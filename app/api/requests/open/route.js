@@ -9,7 +9,12 @@ export async function GET() {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("requests")
-    .select("id, status, requested_datetime, recipient_age, cake_or_cupcakes, servings, cupcake_count, flavor_options, icing_options, interests, favorite_colors, has_allergies, allergy_severity")
+    .select(`
+      id, status, requested_datetime, recipient_age, cake_or_cupcakes,
+      servings, cupcake_count, flavor_options, icing_options, interests,
+      favorite_colors, has_allergies, allergy_severity,
+      recipients ( city, zip_code )
+    `)
     .eq("status", "posted")
     .order("requested_datetime", { ascending: true });
 
@@ -17,5 +22,12 @@ export async function GET() {
     console.error(error);
     return NextResponse.json({ error: "query failed" }, { status: 500 });
   }
-  return NextResponse.json(data);
+
+  const shaped = data.map((r) => ({
+    ...r,
+    recipients: undefined,
+    general_area: r.recipients ? `${r.recipients.city}, ${r.recipients.zip_code}` : null,
+  }));
+
+  return NextResponse.json(shaped);
 }
