@@ -1,14 +1,23 @@
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { clerkMiddleware, createRouteMatcher, clerkClient } from "@clerk/nextjs/server";
+import { NextResponse } from "next/server";
 
-// Both the volunteer portal and the admin queue require sign-in.
-// Note: this only enforces "signed in" — it doesn't distinguish
-// Emily (admin) from a regular volunteer. See the "admin role check"
-// note in README before treating /admin as truly secure.
+// /volunteer requires any signed-in user.
+// /admin requires sign-in AND publicMetadata.role === "admin" on the
+// Clerk user (set manually in the Clerk dashboard — see README).
 const isProtectedRoute = createRouteMatcher(["/volunteer(.*)", "/admin(.*)"]);
+const isAdminRoute = createRouteMatcher(["/admin(.*)"]);
 
-export default clerkMiddleware((auth, req) => {
+export default clerkMiddleware(async (auth, req) => {
   if (isProtectedRoute(req)) {
     auth().protect();
+  }
+
+  if (isAdminRoute(req)) {
+    const { userId } = auth();
+    const user = await clerkClient().users.getUser(userId);
+    if (user.publicMetadata?.role !== "admin") {
+      return NextResponse.redirect(new URL("/volunteer", req.url));
+    }
   }
 });
 

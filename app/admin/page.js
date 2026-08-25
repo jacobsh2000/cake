@@ -1,9 +1,20 @@
+import { auth, clerkClient } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
 import { createAdminClient } from "../../lib/supabaseAdmin";
 import { revalidatePath } from "next/cache";
 
-// NOTE: this page currently has no auth gate — that's the first thing
-// to add before going live (see README "Before go-live" section).
-// For the MVP it's meant to be used only by Emily via a private link.
+export const dynamic = "force-dynamic";
+
+// Defense in depth: middleware.js already blocks non-admins from
+// reaching this page, but the server actions below (approve/reject)
+// are separately callable endpoints — check the role here too rather
+// than relying on middleware alone.
+async function requireAdmin() {
+  const { userId } = auth();
+  if (!userId) redirect("/sign-in");
+  const user = await clerkClient().users.getUser(userId);
+  if (user.publicMetadata?.role !== "admin") redirect("/volunteer");
+}
 
 async function getPendingRequests() {
   const supabase = createAdminClient();
@@ -22,6 +33,7 @@ async function getPendingRequests() {
 
 async function approveRequest(formData) {
   "use server";
+  await requireAdmin();
   const id = formData.get("id");
   const supabase = createAdminClient();
   await supabase.from("requests").update({ status: "posted" }).eq("id", id);
@@ -30,6 +42,7 @@ async function approveRequest(formData) {
 
 async function rejectRequest(formData) {
   "use server";
+  await requireAdmin();
   const id = formData.get("id");
   const notes = formData.get("notes");
   const supabase = createAdminClient();
@@ -38,6 +51,7 @@ async function rejectRequest(formData) {
 }
 
 export default async function AdminPage() {
+  await requireAdmin();
   const requests = await getPendingRequests();
 
   return (
