@@ -3,12 +3,21 @@
 import { useEffect, useState } from "react";
 import { useUser, UserButton } from "@clerk/nextjs";
 
+const STATUS_LABELS = {
+  claimed: "Claimed — not yet contacted",
+  contacted: "Contacted recipient",
+  confirmed: "Confirmed delivery day/time",
+  no_response: "No response from recipient",
+  delivered: "Delivered",
+};
+
 export default function VolunteerBoard() {
   const { user, isLoaded } = useUser();
   const [requests, setRequests] = useState([]);
   const [myClaims, setMyClaims] = useState([]);
+  const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("open"); // "open" | "mine"
+  const [tab, setTab] = useState("open"); // "open" | "mine" | "profile"
 
   useEffect(() => {
     if (isLoaded && user) loadAll();
@@ -16,12 +25,14 @@ export default function VolunteerBoard() {
 
   async function loadAll() {
     setLoading(true);
-    const [openRes, mineRes] = await Promise.all([
+    const [openRes, mineRes, profileRes] = await Promise.all([
       fetch("/api/requests/open"),
       fetch("/api/requests/mine"),
+      fetch("/api/volunteer/profile"),
     ]);
     if (openRes.ok) setRequests(await openRes.json());
     if (mineRes.ok) setMyClaims(await mineRes.json());
+    if (profileRes.ok) setProfile(await profileRes.json());
     setLoading(false);
   }
 
@@ -40,6 +51,16 @@ export default function VolunteerBoard() {
     loadAll();
   }
 
+  async function updateStatus(requestId, status) {
+    const res = await fetch("/api/requests/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId, status }),
+    });
+    if (!res.ok) alert("Couldn't update status — please try again.");
+    loadAll();
+  }
+
   if (!isLoaded) return null;
 
   return (
@@ -55,6 +76,9 @@ export default function VolunteerBoard() {
         </TabButton>
         <TabButton active={tab === "mine"} onClick={() => setTab("mine")}>
           My claimed requests ({myClaims.length})
+        </TabButton>
+        <TabButton active={tab === "profile"} onClick={() => setTab("profile")}>
+          My profile
         </TabButton>
       </div>
 
@@ -118,12 +142,76 @@ export default function VolunteerBoard() {
                 {r.has_allergies && <p style={{ color: "#c62828" }}><strong>Allergies ({r.allergy_severity}):</strong> {r.allergy_details}</p>}
                 {r.interests && <p><strong>Interests:</strong> {r.interests}</p>}
                 {r.favorite_colors && <p><strong>Favorite colors:</strong> {r.favorite_colors}</p>}
+
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #eee" }}>
+                  <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+                    Status: <span style={{ color: "#1565c0" }}>{STATUS_LABELS[r.status] || r.status}</span>
+                  </p>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <StatusButton onClick={() => updateStatus(r.id, "contacted")}>Contacted recipient</StatusButton>
+                    <StatusButton onClick={() => updateStatus(r.id, "confirmed")}>Confirmed delivery day/time</StatusButton>
+                    <StatusButton onClick={() => updateStatus(r.id, "delivered")}>Delivered</StatusButton>
+                    <StatusButton danger onClick={() => updateStatus(r.id, "no_response")}>No response from recipient</StatusButton>
+                  </div>
+                </div>
               </div>
             );
           })}
         </>
       )}
+
+      {!loading && tab === "profile" && (
+        <ProfileForm profile={profile} onSaved={loadAll} />
+      )}
     </main>
+  );
+}
+
+function ProfileForm({ profile, onSaved }) {
+  const [city, setCity] = useState(profile?.city || "");
+  const [state, setState] = useState(profile?.state || "");
+  const [frequency, setFrequency] = useState(profile?.volunteer_frequency || "");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setCity(profile?.city || "");
+    setState(profile?.state || "");
+    setFrequency(profile?.volunteer_frequency || "");
+  }, [profile]);
+
+  async function save(e) {
+    e.preventDefault();
+    setSaving(true);
+    await fetch("/api/volunteer/profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ city, state, volunteerFrequency: frequency }),
+    });
+    setSaving(false);
+    onSaved();
+  }
+
+  return (
+    <form onSubmit={save} style={{ ...cardStyle, maxWidth: 400 }}>
+      <h3 style={{ marginTop: 0 }}>My location & preferences</h3>
+      <label style={labelStyle}>City</label>
+      <input value={city} onChange={(e) => setCity(e.target.value)} style={inputStyle} placeholder="e.g. Columbus" />
+
+      <label style={labelStyle}>State</label>
+      <input value={state} onChange={(e) => setState(e.target.value)} style={inputStyle} placeholder="e.g. OH" />
+
+      <label style={labelStyle}>How often would you like to volunteer?</label>
+      <select value={frequency} onChange={(e) => setFrequency(e.target.value)} style={inputStyle}>
+        <option value="">Select one</option>
+        <option value="weekly">As often as possible (weekly)</option>
+        <option value="monthly">A few times a month</option>
+        <option value="occasionally">Occasionally</option>
+      </select>
+
+      <button type="submit" disabled={saving} style={claimBtnStyle}>
+        {saving ? "Saving..." : "Save"}
+      </button>
+    </form>
   );
 }
 
@@ -147,5 +235,26 @@ function TabButton({ active, onClick, children }) {
   );
 }
 
+function StatusButton({ children, onClick, danger }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        padding: "6px 12px",
+        fontSize: 12,
+        border: `1px solid ${danger ? "#c62828" : "#1565c0"}`,
+        background: "#fff",
+        color: danger ? "#c62828" : "#1565c0",
+        borderRadius: 4,
+        cursor: "pointer",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
 const cardStyle = { border: "1px solid #ddd", borderRadius: 8, padding: 16, marginBottom: 16 };
 const claimBtnStyle = { padding: "8px 14px", background: "#1565c0", color: "white", border: "none", borderRadius: 4, cursor: "pointer" };
+const labelStyle = { display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, marginTop: 10 };
+const inputStyle = { width: "100%", padding: 8, border: "1px solid #ccc", borderRadius: 4, fontSize: 14, boxSizing: "border-box" };
