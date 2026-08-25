@@ -1,22 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { COLORS } from "../../lib/theme";
 
 const FLAVORS = ["Vanilla", "Chocolate", "Funfetti", "Red Velvet", "Lemon", "Marble"];
 const ICINGS = ["Buttercream", "Cream Cheese", "Chocolate Ganache", "Whipped"];
-
-// ---- palette ----
-const COLORS = {
-  bg: "#FAF4EC",
-  card: "#FFFFFF",
-  berry: "#7A2E45",
-  berryDark: "#5E2135",
-  gold: "#C98A2B",
-  ink: "#332821",
-  inkSoft: "#6B5E54",
-  border: "#EDE1D3",
-  error: "#B3261E",
-};
 
 export default function RequestPage() {
   const [form, setForm] = useState({
