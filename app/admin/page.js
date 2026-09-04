@@ -8,12 +8,33 @@ import { COLORS, pageWrap, heading, card, inputStyle, labelStyle, primaryBtn, ou
 import { statusLabel, cakeFormatLabel, travelDistanceLabel } from "../../lib/labels";
 import { formatDateTime, orgLocalToUtcIso, utcToOrgLocalInput } from "../../lib/datetime";
 import { SORT_OPTIONS, matchesQuery, sortRequests } from "../../lib/filters";
+import { roleOf, canReachAdmin, canManageRequests, canAssignVolunteers } from "../../lib/roles";
 
-async function requireAdmin() {
+// Returns the caller's role after confirming they may reach /admin at
+// all. Every server action below then asserts the specific power it
+// needs on top of this — a coordinator can load the page but must not
+// be able to approve or cancel anything by POSTing at it directly.
+async function requireAdminRole() {
   const { userId } = auth();
   if (!userId) redirect("/sign-in");
   const user = await clerkClient().users.getUser(userId);
-  if (user.publicMetadata?.role !== "admin") redirect("/volunteer");
+  const role = roleOf(user);
+  if (!canReachAdmin(role)) redirect("/volunteer");
+  return role;
+}
+
+// Full-admin actions call this. A coordinator reaching one is a
+// redirect, not a silent no-op, so the failure is visible.
+async function requireFullAdmin() {
+  const role = await requireAdminRole();
+  if (!canManageRequests(role)) redirect("/admin?tab=unclaimed");
+  return role;
+}
+
+async function requireAssigner() {
+  const role = await requireAdminRole();
+  if (!canAssignVolunteers(role)) redirect("/volunteer");
+  return role;
 }
 
 const IN_PROGRESS_STATUSES = ["claimed", "contacted", "confirmed", "no_response", "delivered"];
@@ -53,8 +74,23 @@ async function getInProgressRequests(supabase) {
   return data || [];
 }
 
+// Only approved volunteers are offered in the assign dropdowns — there
+// is no point assigning a request to someone who cannot act on it.
 async function getVolunteerOptions(supabase) {
-  const { data } = await supabase.from("volunteer_profiles").select("id, first_name, last_name, city, state, travel_distance").order("first_name");
+  const { data } = await supabase
+    .from("volunteer_profiles")
+    .select("id, first_name, last_name, city, state, travel_distance")
+    .eq("approved", true)
+    .order("first_name");
+  return data || [];
+}
+
+async function getAllVolunteers(supabase) {
+  const { data } = await supabase
+    .from("volunteer_profiles")
+    .select("*")
+    .order("approved", { ascending: true })
+    .order("created_at", { ascending: true });
   return data || [];
 }
 
@@ -62,7 +98,7 @@ async function getVolunteerOptions(supabase) {
 
 async function approveRequest(formData) {
   "use server";
-  await requireAdmin();
+  await requireFullAdmin();
   const supabase = createAdminClient();
   const id = formData.get("id");
   const recipientId = formData.get("recipient_id");
@@ -109,7 +145,7 @@ async function approveRequest(formData) {
 
 async function rejectRequest(formData) {
   "use server";
-  await requireAdmin();
+  await requireFullAdmin();
   const id = formData.get("id");
   const notes = formData.get("notes");
   const supabase = createAdminClient();
@@ -125,7 +161,7 @@ async function rejectRequest(formData) {
 // about it. The status guard re-checks that server-side.
 async function revertToSubmitted(formData) {
   "use server";
-  await requireAdmin();
+  await requireFullAdmin();
   const supabase = createAdminClient();
   const id = formData.get("id");
 
@@ -142,7 +178,7 @@ async function revertToSubmitted(formData) {
 // rejectRequest, which declines one before it is ever posted.
 async function cancelRequest(formData) {
   "use server";
-  await requireAdmin();
+  await requireFullAdmin();
   const id = formData.get("id");
   const reason = (formData.get("reason") || "").trim();
 
@@ -187,13 +223,30 @@ async function cancelRequest(formData) {
   revalidatePath("/admin");
 }
 
+// Approving a volunteer is a full-admin power, not a coordinator one —
+// it decides who gets access to recipient PII.
+async function setVolunteerApproval(formData) {
+  "use server";
+  await requireFullAdmin();
+  const supabase = createAdminClient();
+  const volunteerId = formData.get("volunteer_id");
+  const approved = formData.get("approved") === "true";
+
+  await supabase
+    .from("volunteer_profiles")
+    .update({ approved })
+    .eq("id", volunteerId);
+
+  revalidatePath("/admin");
+}
+
 // Handles BOTH first assignment (unclaimed -> claimed) and reassignment
 // (swap the volunteer on an already-in-progress request) — same action
 // either way: replace whatever claim exists, reset to 'claimed', email
 // the newly assigned volunteer their details.
 async function assignVolunteer(formData) {
   "use server";
-  await requireAdmin();
+  await requireAssigner();
   const requestId = formData.get("request_id");
   const volunteerId = formData.get("volunteer_id");
   if (!volunteerId) { revalidatePath("/admin"); return; }
@@ -246,18 +299,22 @@ function applyFilters(requests, { q, sort, status }) {
 }
 
 export default async function AdminPage({ searchParams }) {
-  await requireAdmin();
-  const tab = searchParams?.tab || "pending";
+  const role = await requireAdminRole();
+  const fullAdmin = canManageRequests(role);
+  // A coordinator has no review queue, so their landing tab is the
+  // first one they can actually act on.
+  const tab = searchParams?.tab || (fullAdmin ? "pending" : "unclaimed");
   const q = searchParams?.q || "";
   const sort = searchParams?.sort || "soonest";
   const status = searchParams?.status || "";
   const supabase = createAdminClient();
 
-  const [pending, unclaimed, inProgress, volunteers] = await Promise.all([
-    getPendingRequests(supabase),
+  const [pending, unclaimed, inProgress, volunteers, allVolunteers] = await Promise.all([
+    fullAdmin ? getPendingRequests(supabase) : [],
     getUnclaimedRequests(supabase),
     getInProgressRequests(supabase),
     getVolunteerOptions(supabase),
+    fullAdmin ? getAllVolunteers(supabase) : [],
   ]);
 
   // Pending review is a queue worked oldest-first, so it keeps its own
@@ -265,26 +322,58 @@ export default async function AdminPage({ searchParams }) {
   const shownPending = applyFilters(pending, { q, sort: "oldest" });
   const shownUnclaimed = applyFilters(unclaimed, { q, sort });
   const shownProgress = applyFilters(inProgress, { q, sort, status });
+  const awaitingApproval = allVolunteers.filter((v) => !v.approved).length;
 
-  const counts = { pending: pending.length, unclaimed: unclaimed.length, progress: inProgress.length };
-  const shownCount = { pending: shownPending.length, unclaimed: shownUnclaimed.length, progress: shownProgress.length }[tab];
+  // A coordinator has no access to these tabs; falling through to
+  // unclaimed keeps a stale bookmark from rendering an empty shell.
+  const effectiveTab = !fullAdmin && (tab === "pending" || tab === "volunteers") ? "unclaimed" : tab;
+
+  const counts = {
+    pending: pending.length,
+    unclaimed: unclaimed.length,
+    progress: inProgress.length,
+    volunteers: allVolunteers.length,
+  };
+  const shownCount = {
+    pending: shownPending.length,
+    unclaimed: shownUnclaimed.length,
+    progress: shownProgress.length,
+    volunteers: allVolunteers.length,
+  }[effectiveTab];
 
   return (
     <div style={pageWrap}>
       <div style={{ maxWidth: 820, margin: "0 auto", width: "100%" }}>
-        <h1 style={{ ...heading, fontSize: 28, marginBottom: 20 }}>Admin dashboard</h1>
-
-        <div style={{ display: "flex", gap: 8, marginBottom: 24, borderBottom: `1px solid ${COLORS.border}` }}>
-          <a href="/admin?tab=pending" style={{ textDecoration: "none" }}><span style={tabBtn(tab === "pending")}>Pending review ({counts.pending})</span></a>
-          <a href="/admin?tab=unclaimed" style={{ textDecoration: "none" }}><span style={tabBtn(tab === "unclaimed")}>Approved — no volunteer ({counts.unclaimed})</span></a>
-          <a href="/admin?tab=progress" style={{ textDecoration: "none" }}><span style={tabBtn(tab === "progress")}>In progress ({counts.progress})</span></a>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
+          <h1 style={{ ...heading, fontSize: 28 }}>Admin dashboard</h1>
+          {!fullAdmin && (
+            <span style={{ ...requestNumberStyle, borderColor: COLORS.gold, color: COLORS.gold }}>
+              Coordinator — assign only
+            </span>
+          )}
         </div>
 
-        <FilterBar tab={tab} q={q} sort={sort} status={status} shown={shownCount} total={counts[tab]} />
+        <div style={{ display: "flex", gap: 8, marginBottom: 24, borderBottom: `1px solid ${COLORS.border}`, flexWrap: "wrap" }}>
+          {fullAdmin && <a href="/admin?tab=pending" style={{ textDecoration: "none" }}><span style={tabBtn(effectiveTab === "pending")}>Pending review ({counts.pending})</span></a>}
+          <a href="/admin?tab=unclaimed" style={{ textDecoration: "none" }}><span style={tabBtn(effectiveTab === "unclaimed")}>Approved — no volunteer ({counts.unclaimed})</span></a>
+          <a href="/admin?tab=progress" style={{ textDecoration: "none" }}><span style={tabBtn(effectiveTab === "progress")}>In progress ({counts.progress})</span></a>
+          {fullAdmin && (
+            <a href="/admin?tab=volunteers" style={{ textDecoration: "none" }}>
+              <span style={tabBtn(effectiveTab === "volunteers")}>
+                Volunteers ({counts.volunteers}){awaitingApproval > 0 ? ` · ${awaitingApproval} waiting` : ""}
+              </span>
+            </a>
+          )}
+        </div>
 
-        {tab === "pending" && <PendingTab requests={shownPending} />}
-        {tab === "unclaimed" && <UnclaimedTab requests={shownUnclaimed} volunteers={volunteers} />}
-        {tab === "progress" && <ProgressTab requests={shownProgress} volunteers={volunteers} />}
+        {effectiveTab !== "volunteers" && (
+          <FilterBar tab={effectiveTab} q={q} sort={sort} status={status} shown={shownCount} total={counts[effectiveTab]} />
+        )}
+
+        {effectiveTab === "pending" && <PendingTab requests={shownPending} />}
+        {effectiveTab === "volunteers" && <VolunteersTab volunteers={allVolunteers} />}
+        {effectiveTab === "unclaimed" && <UnclaimedTab requests={shownUnclaimed} volunteers={volunteers} fullAdmin={fullAdmin} />}
+        {effectiveTab === "progress" && <ProgressTab requests={shownProgress} volunteers={volunteers} fullAdmin={fullAdmin} />}
       </div>
     </div>
   );
@@ -402,7 +491,7 @@ function PendingTab({ requests }) {
 
 // ==================== tab: approved, no volunteer ====================
 
-function UnclaimedTab({ requests, volunteers }) {
+function UnclaimedTab({ requests, volunteers, fullAdmin }) {
   return (
     <>
       {requests.length === 0 && <p style={{ color: COLORS.inkSoft }}>Nothing approved and waiting for a volunteer.</p>}
@@ -417,17 +506,20 @@ function UnclaimedTab({ requests, volunteers }) {
           </p>
           <AssignForm requestId={r.id} volunteers={volunteers} buttonLabel="Assign volunteer" />
 
-          <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${COLORS.border}` }}>
-            <form action={revertToSubmitted} style={{ display: "inline" }}>
-              <input type="hidden" name="id" value={r.id} />
-              <button type="submit" style={outlineBtn()}>Send back for editing</button>
-            </form>
-            <span style={{ fontSize: 12, color: COLORS.inkSoft, marginLeft: 10, fontFamily }}>
-              Returns it to Pending review. No volunteer has claimed it yet.
-            </span>
-          </div>
-
-          <CancelForm requestId={r.id} />
+          {fullAdmin && (
+            <>
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${COLORS.border}` }}>
+                <form action={revertToSubmitted} style={{ display: "inline" }}>
+                  <input type="hidden" name="id" value={r.id} />
+                  <button type="submit" style={outlineBtn()}>Send back for editing</button>
+                </form>
+                <span style={{ fontSize: 12, color: COLORS.inkSoft, marginLeft: 10, fontFamily }}>
+                  Returns it to Pending review. No volunteer has claimed it yet.
+                </span>
+              </div>
+              <CancelForm requestId={r.id} />
+            </>
+          )}
         </div>
       ))}
     </>
@@ -436,7 +528,7 @@ function UnclaimedTab({ requests, volunteers }) {
 
 // ==================== tab: in progress ====================
 
-function ProgressTab({ requests, volunteers }) {
+function ProgressTab({ requests, volunteers, fullAdmin }) {
   return (
     <>
       {requests.length === 0 && <p style={{ color: COLORS.inkSoft }}>Nothing in progress right now.</p>}
@@ -457,11 +549,68 @@ function ProgressTab({ requests, volunteers }) {
               <strong>Status:</strong> <span style={{ color: COLORS.berry }}>{statusLabel(r.status)}</span>
             </p>
             <AssignForm requestId={r.id} volunteers={volunteers} buttonLabel="Reassign to different volunteer" currentVolunteerId={claim?.volunteer_id} />
-            <CancelForm requestId={r.id} hasVolunteer />
+            {fullAdmin && <CancelForm requestId={r.id} hasVolunteer />}
           </div>
         );
       })}
     </>
+  );
+}
+
+// ==================== tab: volunteers ====================
+
+function VolunteersTab({ volunteers }) {
+  const waiting = volunteers.filter((v) => !v.approved);
+  const active = volunteers.filter((v) => v.approved);
+
+  return (
+    <>
+      <p style={{ color: COLORS.inkSoft, fontSize: 14, marginBottom: 16 }}>
+        Approving a volunteer lets them claim requests, which means seeing recipient names,
+        addresses and phone numbers. Only approve people you know.
+      </p>
+
+      <h3 style={{ ...heading, fontSize: 17, marginBottom: 10 }}>Waiting for approval ({waiting.length})</h3>
+      {waiting.length === 0 && <p style={{ color: COLORS.inkSoft, marginBottom: 24 }}>Nobody waiting.</p>}
+      {waiting.map((v) => <VolunteerRow key={v.id} volunteer={v} />)}
+
+      <h3 style={{ ...heading, fontSize: 17, margin: "28px 0 10px" }}>Approved ({active.length})</h3>
+      {active.length === 0 && <p style={{ color: COLORS.inkSoft }}>No approved volunteers yet.</p>}
+      {active.map((v) => <VolunteerRow key={v.id} volunteer={v} />)}
+    </>
+  );
+}
+
+function VolunteerRow({ volunteer: v }) {
+  const name = `${v.first_name} ${v.last_name}`.trim();
+  const does = [v.can_bake && "bakes", v.can_buy && "buys", v.can_deliver && "delivers"].filter(Boolean).join(" · ");
+
+  return (
+    <div style={{ ...card, padding: 16, marginBottom: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <div style={{ minWidth: 220 }}>
+          <strong style={{ fontFamily, fontSize: 15 }}>{name || "(no name set)"}</strong>
+          {v.email && <p style={{ fontSize: 13, color: COLORS.inkSoft, margin: "2px 0 0", fontFamily }}>{v.email}</p>}
+          <p style={{ fontSize: 13, color: COLORS.inkSoft, margin: "4px 0 0", fontFamily }}>
+            {v.general_area || "Area not set"}
+            {v.travel_distance ? ` · travels ${travelDistanceLabel(v.travel_distance)}` : ""}
+            {does ? ` · ${does}` : ""}
+          </p>
+          {v.interests && <p style={{ fontSize: 13, color: COLORS.ink, margin: "6px 0 0", fontFamily }}>{v.interests}</p>}
+          <p style={{ fontSize: 12, color: COLORS.inkSoft, margin: "6px 0 0", fontFamily }}>
+            Signed up {new Date(v.created_at).toLocaleDateString()}
+          </p>
+        </div>
+
+        <form action={setVolunteerApproval}>
+          <input type="hidden" name="volunteer_id" value={v.id} />
+          <input type="hidden" name="approved" value={v.approved ? "false" : "true"} />
+          <button type="submit" style={v.approved ? dangerBtn() : primaryBtn()}>
+            {v.approved ? "Revoke access" : "Approve"}
+          </button>
+        </form>
+      </div>
+    </div>
   );
 }
 

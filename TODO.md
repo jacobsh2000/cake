@@ -23,18 +23,6 @@ file or a sentence that doesn't exist in the repo yet.
 
 ## Medium — not started
 
-- Let Emily revert an approved ("posted") request back to "submitted"
-  for further editing. Needs a decision on what happens when the
-  request has already been claimed.
-- Let a request be cancelled with a required reason, distinct from
-  "rejected" (which is pre-approval). This one is for an already-posted
-  or claimed request that has to come down.
-- Volunteer role on a claim: making/buying, delivering, or both.
-- Expand the volunteer profile with interests / cause preferences.
-- Require admin approval of new volunteer signups before they can
-  claim. Needs an `approved` flag, a review UI, and gating the claim.
-- A lower-privilege admin role that can only assign and reassign
-  volunteers, without approve/reject powers.
 - **Sync approved requests to a Google Sheet.** Confirmed a real
   requirement. Blocked in practice on Google service-account
   credentials and a test sheet to point at.

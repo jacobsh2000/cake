@@ -17,7 +17,7 @@ export async function GET() {
   const { data, error } = await supabase
     .from("claims")
     .select(`
-      id, claimed_at, contacted_recipient_at, delivery_confirmed_at,
+      id, claimed_at, contacted_recipient_at, delivery_confirmed_at, volunteer_role,
       requests (
         id, request_number, status, cancellation_reason,
         requested_datetime, recipient_age, recipient_first_name,

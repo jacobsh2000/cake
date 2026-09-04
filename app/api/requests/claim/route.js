@@ -8,17 +8,41 @@ export async function POST(req) {
   const { userId } = auth();
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const { requestId } = await req.json();
+  const { requestId, volunteerRole } = await req.json();
   const supabase = createAdminClient();
 
   // Ensure a volunteer_profiles row exists for this Clerk user
   // (id is the Clerk user id, stored as text — see schema migration).
+  // `approved` is deliberately not in this payload: an upsert only
+  // writes the columns it names, so claiming can never flip a
+  // volunteer's own approval, and a re-claim can't reset it either.
   const user = await currentUser();
   await supabase.from("volunteer_profiles").upsert({
     id: userId,
     first_name: user?.firstName || "",
     last_name: user?.lastName || "",
+    email: user?.emailAddresses?.[0]?.emailAddress || null,
   });
+
+  // Approval gate. The board hides the claim buttons for an unapproved
+  // volunteer, but that is presentation — this check is the one that
+  // decides. Read after the upsert so a brand-new row is seen.
+  const { data: profile } = await supabase
+    .from("volunteer_profiles")
+    .select("approved")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (!profile?.approved) {
+    return NextResponse.json(
+      { error: "Your volunteer account is waiting for approval." },
+      { status: 403 },
+    );
+  }
+
+  // Anything unrecognised falls back to 'both', which is what claiming
+  // meant before the field existed.
+  const role = ["make", "deliver", "both"].includes(volunteerRole) ? volunteerRole : "both";
 
   // Only succeeds if the request is still 'posted' — the unique
   // constraint on claims.request_id also blocks a double-claim race.
@@ -35,6 +59,7 @@ export async function POST(req) {
   const { error: claimError } = await supabase.from("claims").insert({
     request_id: requestId,
     volunteer_id: userId,
+    volunteer_role: role,
   });
   if (claimError) {
     return NextResponse.json({ error: "already claimed" }, { status: 409 });

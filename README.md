@@ -27,11 +27,35 @@ static marketing pages and links out to this app.
    - `migration_add_cancelled_status.sql` — **run this one on its own.**
      Postgres refuses to use an enum value added earlier in the same
      transaction, and the SQL editor runs a pasted script as one.
+   - `migration_add_volunteer_approval.sql`
+   - `migration_expand_volunteer_profile.sql`
+   - `migration_add_claim_role.sql`
 5. Copy `.env.local.example` to `.env.local` and fill it in.
 6. `npm run dev` → http://localhost:3000
 
-To reach `/admin` locally, tag your own Clerk user with
-`publicMetadata: { "role": "admin" }` in the Clerk dashboard.
+## Admin roles
+
+Tagged on the Clerk user as `publicMetadata.role`:
+
+- `admin` — the full dashboard: review, approve, reject, send back,
+  cancel, assign, and approve volunteers.
+- `coordinator` — matchmaking only. Can assign and reassign volunteers
+  to already-approved requests; cannot see the review queue and cannot
+  approve, cancel or revert anything, or approve volunteers.
+
+Set one in the Clerk dashboard to reach `/admin` locally. Hiding a tab
+decides what's convenient to reach; `lib/roles.js` is re-checked inside
+every server action, which is what decides what a crafted POST can do.
+
+## Volunteer approval
+
+New signups land unapproved and cannot claim until an admin approves
+them on the Volunteers tab — approval is what grants access to
+recipient PII. A profile row is created the first time a volunteer
+loads `/volunteer`, so they appear in the queue without having to do
+anything first. The migration grandfathers everyone who already
+existed; it does not re-approve anyone on a re-run, so a deliberate
+revocation sticks.
 
 ## Dates and times
 

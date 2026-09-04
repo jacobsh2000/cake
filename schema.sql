@@ -97,11 +97,26 @@ create table volunteer_profiles (
   last_name text not null default '',
   city text,
   state text,
+  email text,                                          -- Clerk owns the authoritative copy; mirrored here so the
+                                                       -- admin approval list is readable without N API lookups
   general_area text,                                   -- coarse location for matching, no street address needed
   volunteer_frequency text,                            -- how often they want to volunteer
   travel_distance text,                                -- '0_5' | '5_10' | '10_20' | '20_plus' miles willing to drive
+  interests text,                                      -- causes / themes they'd like to bake for
+
+  -- What they're willing to do in general. Distinct from what they
+  -- signed up for on one request (claims.volunteer_role).
+  can_bake boolean not null default true,
+  can_buy boolean not null default true,
+  can_deliver boolean not null default true,
+
+  -- New signups wait for an admin before they can claim anything.
+  approved boolean not null default false,
+
   created_at timestamptz not null default now()
 );
+
+create index volunteer_profiles_approved_idx on volunteer_profiles(approved);
 
 -- ============================================================
 -- CLAIMS  (links a volunteer to a request; this is the ONLY place
@@ -111,6 +126,7 @@ create table claims (
   id uuid primary key default gen_random_uuid(),
   request_id uuid not null references requests(id) on delete cascade unique,
   volunteer_id text not null references volunteer_profiles(id) on delete cascade,
+  volunteer_role text not null default 'both',         -- 'make' | 'deliver' | 'both' — what they took on
   claimed_at timestamptz not null default now(),
   contacted_recipient_at timestamptz,
   delivery_confirmed_at timestamptz

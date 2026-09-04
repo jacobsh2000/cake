@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useUser, UserButton } from "@clerk/nextjs";
 import { COLORS, pageWrap, heading, card, inputStyle, labelStyle, primaryBtn, outlineBtn, dangerBtn, tabBtn, fontFamily, requestNumberStyle } from "../../lib/theme";
-import { statusLabel, cakeFormatLabel, TRAVEL_DISTANCE_OPTIONS } from "../../lib/labels";
+import { statusLabel, cakeFormatLabel, claimRoleLabel, TRAVEL_DISTANCE_OPTIONS, CLAIM_ROLE_OPTIONS } from "../../lib/labels";
 import { formatDateTime } from "../../lib/datetime";
 import {
   SORT_OPTIONS, CAKE_FILTER_OPTIONS, ALLERGY_FILTER_OPTIONS,
@@ -18,6 +18,10 @@ export default function VolunteerBoard() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("open");
   const [filters, setFilters] = useState({ q: "", format: "", allergy: "", sort: "soonest" });
+
+  // Until the profile has loaded, treat the volunteer as unapproved so
+  // the claim controls don't flash into view and then disappear.
+  const approved = profile?.approved === true;
 
   const visibleRequests = sortRequests(
     requests.filter((r) =>
@@ -49,17 +53,17 @@ export default function VolunteerBoard() {
     setLoading(false);
   }
 
-  async function claim(request) {
+  async function claim(request, volunteerRole) {
     const when = formatDateTime(request.requested_datetime);
-    if (!confirm(`Claim this request? You'll be committing to a ${cakeFormatLabel(request.cake_or_cupcakes)} needed by ${when}, and the recipient's contact details will be shared with you.`)) return;
-    const requestId = request.id;
+    if (!confirm(`Claim this request? You'll be committing to ${claimRoleLabel(volunteerRole).toLowerCase()} for a ${cakeFormatLabel(request.cake_or_cupcakes)} needed by ${when}, and the recipient's contact details will be shared with you.`)) return;
     const res = await fetch("/api/requests/claim", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requestId }),
+      body: JSON.stringify({ requestId: request.id, volunteerRole }),
     });
     if (!res.ok) {
-      alert("This request may have just been claimed by someone else. Refreshing the list.");
+      const body = await res.json().catch(() => ({}));
+      alert(body.error || "This request may have just been claimed by someone else. Refreshing the list.");
     } else {
       alert("Claimed! Check your email for the recipient's full details, or see them under \"My Claimed Requests\" below.");
       setTab("mine");
@@ -104,6 +108,16 @@ export default function VolunteerBoard() {
           <button style={tabBtn(tab === "profile")} onClick={() => setTab("profile")}>My profile</button>
         </div>
 
+        {!loading && profile && !approved && (
+          <div style={{ ...card, background: "#FFF8E8", border: `1px solid ${COLORS.gold}`, padding: 16, marginBottom: 16 }}>
+            <strong style={{ fontFamily, color: COLORS.gold }}>Your account is awaiting approval</strong>
+            <p style={{ ...pText, margin: "6px 0 0" }}>
+              You can browse open requests and fill in your profile now. An admin will approve
+              your account shortly, and claiming will unlock then.
+            </p>
+          </div>
+        )}
+
         {loading && <p style={{ color: COLORS.inkSoft }}>Loading...</p>}
 
         {!loading && tab === "open" && (
@@ -131,7 +145,9 @@ export default function VolunteerBoard() {
                 {r.interests && <p style={pText}><strong>Interests:</strong> {r.interests}</p>}
                 {r.favorite_colors && <p style={pText}><strong>Favorite colors:</strong> {r.favorite_colors}</p>}
                 <p style={{ fontSize: 13, color: COLORS.inkSoft }}>Recipient name, address, and phone are revealed once you claim this request.</p>
-                <button onClick={() => claim(r)} style={primaryBtn({ marginTop: 8 })}>Claim this request</button>
+                {approved
+                  ? <ClaimControls request={r} onClaim={claim} />
+                  : <p style={{ fontSize: 13, color: COLORS.inkSoft, marginTop: 8, fontFamily }}>Claiming unlocks once an admin approves your account.</p>}
               </div>
             ))}
           </>
@@ -148,7 +164,7 @@ export default function VolunteerBoard() {
                 <div key={c.id} style={card}>
                   <span style={requestNumberStyle}>Request {r.request_number}</span>
                   <h3 style={{ ...heading, fontSize: 18, margin: "8px 0 4px" }}>{r.recipient_first_name}, age {r.recipient_age} — {cakeFormatLabel(r.cake_or_cupcakes)}</h3>
-                  <p style={{ fontSize: 13, color: COLORS.inkSoft }}>Claimed {new Date(c.claimed_at).toLocaleDateString()}</p>
+                  <p style={{ fontSize: 13, color: COLORS.inkSoft }}>Claimed {new Date(c.claimed_at).toLocaleDateString()} · {claimRoleLabel(c.volunteer_role)}</p>
 
                   {cancelled && (
                     <div style={{ background: "#FDECEA", border: `1px solid ${COLORS.error}`, borderRadius: 10, padding: 14, marginTop: 12 }}>
@@ -205,6 +221,20 @@ export default function VolunteerBoard() {
   );
 }
 
+// The role is picked before claiming rather than after, because it's
+// part of what the volunteer is agreeing to — the confirmation names it.
+function ClaimControls({ request, onClaim }) {
+  const [role, setRole] = useState("both");
+  return (
+    <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
+      <select value={role} onChange={(e) => setRole(e.target.value)} style={{ ...inputStyle, marginBottom: 0, maxWidth: 240 }}>
+        {CLAIM_ROLE_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+      </select>
+      <button onClick={() => onClaim(request, role)} style={primaryBtn()}>Claim this request</button>
+    </div>
+  );
+}
+
 function OpenFilters({ filters, setFilters, shown, total }) {
   const set = (key) => (e) => setFilters((f) => ({ ...f, [key]: e.target.value }));
   const compact = { ...inputStyle, marginBottom: 0 };
@@ -245,55 +275,107 @@ function OpenFilters({ filters, setFilters, shown, total }) {
 }
 
 function ProfileForm({ profile, onSaved }) {
-  const [city, setCity] = useState(profile?.city || "");
-  const [state, setState] = useState(profile?.state || "");
-  const [frequency, setFrequency] = useState(profile?.volunteer_frequency || "");
-  const [travelDistance, setTravelDistance] = useState(profile?.travel_distance || "");
+  const [form, setForm] = useState(emptyProfile);
   const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
 
-  useEffect(() => {
-    setCity(profile?.city || "");
-    setState(profile?.state || "");
-    setFrequency(profile?.volunteer_frequency || "");
-    setTravelDistance(profile?.travel_distance || "");
-  }, [profile]);
+  useEffect(() => { setForm(profileToForm(profile)); }, [profile]);
+
+  const set = (key) => (e) =>
+    setForm((f) => ({ ...f, [key]: e.target.type === "checkbox" ? e.target.checked : e.target.value }));
 
   async function save(e) {
     e.preventDefault();
     setSaving(true);
+    setSaved(false);
     await fetch("/api/volunteer/profile", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ city, state, volunteerFrequency: frequency, travelDistance }),
+      body: JSON.stringify(form),
     });
     setSaving(false);
+    setSaved(true);
     onSaved();
   }
 
   return (
-    <form onSubmit={save} style={{ ...card, maxWidth: 400 }}>
-      <h3 style={{ ...heading, fontSize: 18, marginBottom: 14 }}>My location & preferences</h3>
+    <form onSubmit={save} style={{ ...card, maxWidth: 460 }}>
+      <h3 style={{ ...heading, fontSize: 18, marginBottom: 4 }}>My profile</h3>
+      <p style={{ fontSize: 13, color: COLORS.inkSoft, marginTop: 0, marginBottom: 16 }}>
+        This helps match you to requests near you that suit what you like to make.
+      </p>
+
       <label style={labelStyle}>City</label>
-      <input value={city} onChange={(e) => setCity(e.target.value)} style={inputStyle} placeholder="e.g. Columbus" />
+      <input value={form.city} onChange={set("city")} style={inputStyle} placeholder="e.g. Columbus" />
+
       <label style={labelStyle}>State</label>
-      <input value={state} onChange={(e) => setState(e.target.value)} style={inputStyle} placeholder="e.g. OH" />
+      <input value={form.state} onChange={set("state")} style={inputStyle} placeholder="e.g. OH" />
+
       <label style={labelStyle}>How often would you like to volunteer?</label>
-      <select value={frequency} onChange={(e) => setFrequency(e.target.value)} style={inputStyle}>
+      <select value={form.volunteerFrequency} onChange={set("volunteerFrequency")} style={inputStyle}>
         <option value="">Select one</option>
         <option value="weekly">As often as possible (weekly)</option>
         <option value="monthly">A few times a month</option>
         <option value="occasionally">Occasionally</option>
       </select>
+
       <label style={labelStyle}>How far are you willing to travel to deliver?</label>
-      <select value={travelDistance} onChange={(e) => setTravelDistance(e.target.value)} style={inputStyle}>
+      <select value={form.travelDistance} onChange={set("travelDistance")} style={inputStyle}>
         <option value="">Select one</option>
         {TRAVEL_DISTANCE_OPTIONS.map(([value, label]) => (
           <option key={value} value={value}>{label}</option>
         ))}
       </select>
+
+      <label style={labelStyle}>What are you up for?</label>
+      <p style={{ fontSize: 12, color: COLORS.inkSoft, marginTop: -2, marginBottom: 8 }}>
+        You can still pick something different on any individual request.
+      </p>
+      <Check label="Baking from scratch" checked={form.canBake} onChange={set("canBake")} />
+      <Check label="Buying a cake or cupcakes" checked={form.canBuy} onChange={set("canBuy")} />
+      <Check label="Delivering" checked={form.canDeliver} onChange={set("canDeliver")} />
+
+      <label style={{ ...labelStyle, marginTop: 16 }}>Anything you especially enjoy making?</label>
+      <textarea
+        value={form.interests}
+        onChange={set("interests")}
+        rows={3}
+        style={{ ...inputStyle, resize: "vertical" }}
+        placeholder="Themed decorating, dietary-restriction bakes, character cakes, last-minute fills…"
+      />
+
       <button type="submit" disabled={saving} style={primaryBtn()}>{saving ? "Saving..." : "Save"}</button>
+      {saved && !saving && <span style={{ marginLeft: 10, fontSize: 13, color: COLORS.success, fontFamily }}>Saved</span>}
     </form>
   );
+}
+
+function Check({ label, checked, onChange }) {
+  return (
+    <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, fontSize: 14, fontFamily, cursor: "pointer" }}>
+      <input type="checkbox" checked={checked} onChange={onChange} style={{ width: 16, height: 16, accentColor: COLORS.berry }} />
+      {label}
+    </label>
+  );
+}
+
+const emptyProfile = {
+  city: "", state: "", volunteerFrequency: "", travelDistance: "",
+  interests: "", canBake: true, canBuy: true, canDeliver: true,
+};
+
+function profileToForm(profile) {
+  if (!profile) return emptyProfile;
+  return {
+    city: profile.city || "",
+    state: profile.state || "",
+    volunteerFrequency: profile.volunteer_frequency || "",
+    travelDistance: profile.travel_distance || "",
+    interests: profile.interests || "",
+    canBake: profile.can_bake !== false,
+    canBuy: profile.can_buy !== false,
+    canDeliver: profile.can_deliver !== false,
+  };
 }
 
 const pText = { fontSize: 14, color: COLORS.ink, fontFamily, margin: "4px 0" };
