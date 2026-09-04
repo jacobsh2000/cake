@@ -20,13 +20,21 @@ export async function POST(req) {
   // status of any request — this filter is the real security check.
   const { data: claim, error: claimError } = await supabase
     .from("claims")
-    .select("id")
+    .select("id, requests(status)")
     .eq("request_id", requestId)
     .eq("volunteer_id", userId)
     .maybeSingle();
 
   if (claimError || !claim) {
     return NextResponse.json({ error: "not your claim" }, { status: 403 });
+  }
+
+  // A cancelled request is finished. The claim row is kept so the
+  // volunteer can still see what happened and why, but it must not be
+  // advanceable — nobody should be able to mark a cancelled request
+  // delivered.
+  if (claim.requests?.status === "cancelled") {
+    return NextResponse.json({ error: "request cancelled" }, { status: 409 });
   }
 
   const requestUpdate = { status };

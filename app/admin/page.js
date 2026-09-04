@@ -2,9 +2,9 @@ import { auth, clerkClient } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { createAdminClient } from "../../lib/supabaseAdmin";
 import { sendEmail } from "../../lib/sendEmail";
-import { claimEmailHtml } from "../../lib/emailTemplates";
+import { claimEmailHtml, cancellationEmailHtml } from "../../lib/emailTemplates";
 import { revalidatePath } from "next/cache";
-import { COLORS, pageWrap, heading, card, inputStyle, labelStyle, primaryBtn, dangerBtn, tabBtn, fontFamily, requestNumberStyle } from "../../lib/theme";
+import { COLORS, pageWrap, heading, card, inputStyle, labelStyle, primaryBtn, outlineBtn, dangerBtn, tabBtn, fontFamily, requestNumberStyle } from "../../lib/theme";
 import { statusLabel, cakeFormatLabel, travelDistanceLabel } from "../../lib/labels";
 import { formatDateTime, orgLocalToUtcIso, utcToOrgLocalInput } from "../../lib/datetime";
 
@@ -113,6 +113,76 @@ async function rejectRequest(formData) {
   const notes = formData.get("notes");
   const supabase = createAdminClient();
   await supabase.from("requests").update({ status: "rejected", admin_notes: notes || null }).eq("id", id);
+  revalidatePath("/admin");
+}
+
+// Pulls an approved-but-unclaimed request back into the review queue so
+// it can be edited and re-approved. Deliberately not offered once a
+// volunteer holds it — silently yanking a request out from under
+// someone who is already baking is not an edit, it's a cancellation,
+// and it goes through cancelRequest so the volunteer actually hears
+// about it. The status guard re-checks that server-side.
+async function revertToSubmitted(formData) {
+  "use server";
+  await requireAdmin();
+  const supabase = createAdminClient();
+  const id = formData.get("id");
+
+  await supabase
+    .from("requests")
+    .update({ status: "submitted" })
+    .eq("id", id)
+    .eq("status", "posted");
+
+  revalidatePath("/admin");
+}
+
+// Takes down an already-approved request, claimed or not. Distinct from
+// rejectRequest, which declines one before it is ever posted.
+async function cancelRequest(formData) {
+  "use server";
+  await requireAdmin();
+  const id = formData.get("id");
+  const reason = (formData.get("reason") || "").trim();
+
+  // The reason is the point of this action — it's what the volunteer
+  // gets told. Refuse rather than cancel silently.
+  if (!reason) { revalidatePath("/admin"); return; }
+
+  const supabase = createAdminClient();
+
+  const { data: reqRow } = await supabase
+    .from("requests")
+    .select("*, recipients(*), claims(volunteer_id)")
+    .eq("id", id)
+    .single();
+  if (!reqRow) return;
+
+  await supabase
+    .from("requests")
+    .update({ status: "cancelled", cancellation_reason: reason })
+    .eq("id", id);
+
+  // The claim row stays. The volunteer keeps seeing the request in
+  // their list, marked cancelled and carrying the reason, rather than
+  // it vanishing overnight with no explanation.
+  const volunteerId = reqRow.claims?.[0]?.volunteer_id;
+  if (volunteerId) {
+    try {
+      const volunteerUser = await clerkClient().users.getUser(volunteerId);
+      const volunteerEmail = volunteerUser?.emailAddresses?.[0]?.emailAddress;
+      if (volunteerEmail) {
+        await sendEmail({
+          to: volunteerEmail,
+          subject: `Cake request ${reqRow.request_number} has been cancelled`,
+          html: cancellationEmailHtml(reqRow, reason),
+        });
+      }
+    } catch (e) {
+      console.error("cancellation email failed:", e);
+    }
+  }
+
   revalidatePath("/admin");
 }
 
@@ -273,6 +343,18 @@ function UnclaimedTab({ requests, volunteers }) {
             📍 {r.recipients.city}, {r.recipients.zip_code} · Needed by {formatDateTime(r.requested_datetime)}
           </p>
           <AssignForm requestId={r.id} volunteers={volunteers} buttonLabel="Assign volunteer" />
+
+          <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${COLORS.border}` }}>
+            <form action={revertToSubmitted} style={{ display: "inline" }}>
+              <input type="hidden" name="id" value={r.id} />
+              <button type="submit" style={outlineBtn()}>Send back for editing</button>
+            </form>
+            <span style={{ fontSize: 12, color: COLORS.inkSoft, marginLeft: 10, fontFamily }}>
+              Returns it to Pending review. No volunteer has claimed it yet.
+            </span>
+          </div>
+
+          <CancelForm requestId={r.id} />
         </div>
       ))}
     </>
@@ -302,10 +384,36 @@ function ProgressTab({ requests, volunteers }) {
               <strong>Status:</strong> <span style={{ color: COLORS.berry }}>{statusLabel(r.status)}</span>
             </p>
             <AssignForm requestId={r.id} volunteers={volunteers} buttonLabel="Reassign to different volunteer" currentVolunteerId={claim?.volunteer_id} />
+            <CancelForm requestId={r.id} hasVolunteer />
           </div>
         );
       })}
     </>
+  );
+}
+
+// The reason is required, not decoration — it's what gets emailed to
+// the volunteer holding the request, so the button stays disabled-ish
+// by virtue of the server action refusing an empty one.
+function CancelForm({ requestId, hasVolunteer }) {
+  return (
+    <form action={cancelRequest} style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "flex-start" }}>
+      <input type="hidden" name="id" value={requestId} />
+      <div style={{ flex: 1 }}>
+        <input
+          name="reason"
+          required
+          placeholder="Why is this being cancelled? (required)"
+          style={{ ...inputStyle, marginBottom: 4 }}
+        />
+        <span style={{ fontSize: 12, color: COLORS.inkSoft, fontFamily }}>
+          {hasVolunteer
+            ? "The assigned volunteer is emailed this reason."
+            : "Takes the request off the volunteer board."}
+        </span>
+      </div>
+      <button type="submit" style={dangerBtn()}>Cancel request</button>
+    </form>
   );
 }
 

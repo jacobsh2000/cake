@@ -116,11 +116,22 @@ export default function VolunteerBoard() {
             {myClaims.map((c) => {
               const r = c.requests;
               const p = r.recipients;
+              const cancelled = r.status === "cancelled";
               return (
                 <div key={c.id} style={card}>
                   <span style={requestNumberStyle}>Request {r.request_number}</span>
                   <h3 style={{ ...heading, fontSize: 18, margin: "8px 0 4px" }}>{r.recipient_first_name}, age {r.recipient_age} — {cakeFormatLabel(r.cake_or_cupcakes)}</h3>
                   <p style={{ fontSize: 13, color: COLORS.inkSoft }}>Claimed {new Date(c.claimed_at).toLocaleDateString()}</p>
+
+                  {cancelled && (
+                    <div style={{ background: "#FDECEA", border: `1px solid ${COLORS.error}`, borderRadius: 10, padding: 14, marginTop: 12 }}>
+                      <strong style={{ fontFamily, color: COLORS.error }}>This request was cancelled</strong>
+                      {r.cancellation_reason && <p style={{ ...pText, margin: "6px 0 0" }}>{r.cancellation_reason}</p>}
+                      <p style={{ ...pText, margin: "6px 0 0", color: COLORS.inkSoft }}>
+                        Nothing more to do here — please don't contact the family about it.
+                      </p>
+                    </div>
+                  )}
 
                   <div style={{ background: COLORS.bg, borderRadius: 10, padding: 14, margin: "12px 0", border: `1px solid ${COLORS.border}` }}>
                     <strong style={{ fontFamily }}>Recipient contact info</strong>
@@ -141,18 +152,20 @@ export default function VolunteerBoard() {
                   {r.interests && <p style={pText}><strong>Interests:</strong> {r.interests}</p>}
                   {r.favorite_colors && <p style={pText}><strong>Favorite colors:</strong> {r.favorite_colors}</p>}
 
-                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${COLORS.border}` }}>
-                    <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, fontFamily }}>
-                      Status: <span style={{ color: COLORS.berry }}>{statusLabel(r.status)}</span>
-                    </p>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
-                      <button style={outlineBtn()} onClick={() => updateStatus(r.id, "contacted")}>Contacted recipient</button>
-                      <button style={outlineBtn()} onClick={() => updateStatus(r.id, "confirmed")}>Confirmed delivery day/time</button>
-                      <button style={outlineBtn(COLORS.success)} onClick={() => updateStatus(r.id, "delivered")}>Delivered</button>
-                      <button style={outlineBtn(COLORS.error)} onClick={() => updateStatus(r.id, "no_response")}>No response from recipient</button>
+                  {!cancelled && (
+                    <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${COLORS.border}` }}>
+                      <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, fontFamily }}>
+                        Status: <span style={{ color: COLORS.berry }}>{statusLabel(r.status)}</span>
+                      </p>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+                        <button style={outlineBtn()} onClick={() => updateStatus(r.id, "contacted")}>Contacted recipient</button>
+                        <button style={outlineBtn()} onClick={() => updateStatus(r.id, "confirmed")}>Confirmed delivery day/time</button>
+                        <button style={outlineBtn(COLORS.success)} onClick={() => updateStatus(r.id, "delivered")}>Delivered</button>
+                        <button style={outlineBtn(COLORS.error)} onClick={() => updateStatus(r.id, "no_response")}>No response from recipient</button>
+                      </div>
+                      <button style={dangerBtn()} onClick={() => unclaim(r.id)}>Release this request</button>
                     </div>
-                    <button style={dangerBtn()} onClick={() => unclaim(r.id)}>Release this request</button>
-                  </div>
+                  )}
                 </div>
               );
             })}

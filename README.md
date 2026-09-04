@@ -24,6 +24,9 @@ static marketing pages and links out to this app.
    - `migration_add_travel_distance.sql`
    - `migration_add_request_number.sql`
    - `migration_requested_datetime_timestamptz.sql`
+   - `migration_add_cancelled_status.sql` — **run this one on its own.**
+     Postgres refuses to use an enum value added earlier in the same
+     transaction, and the SQL editor runs a pasted script as one.
 5. Copy `.env.local.example` to `.env.local` and fill it in.
 6. `npm run dev` → http://localhost:3000
 

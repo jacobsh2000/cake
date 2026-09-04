@@ -29,9 +29,13 @@ create table recipients (
 -- ============================================================
 -- REQUESTS  (volunteer-visible once approved — no PII in this table)
 -- ============================================================
+-- 'rejected' is declined at review, before the request is ever posted.
+-- 'cancelled' is an already-approved request taken back down. Keeping
+-- them distinct keeps "turned down" and "fell through" separate.
 create type request_status as enum (
   'submitted', 'approved', 'rejected', 'posted',
-  'claimed', 'contacted', 'confirmed', 'delivered', 'expired'
+  'claimed', 'contacted', 'confirmed', 'delivered', 'expired',
+  'no_response', 'cancelled'
 );
 
 -- Short, sequential handle for humans — "request 1042". The UUID stays
@@ -73,6 +77,7 @@ create table requests (
   terms_accepted boolean not null default false,
 
   admin_notes text,                                   -- Emily's private notes, never shown to volunteers
+  cancellation_reason text,                            -- required when status = 'cancelled'; shown to the volunteer who held it
   reassignment_deadline timestamptz,                   -- set when claimed; drives the 48hr auto-reassign job
 
   created_at timestamptz not null default now(),
