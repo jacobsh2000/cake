@@ -4,7 +4,7 @@ import { createAdminClient } from "../../lib/supabaseAdmin";
 import { sendEmail } from "../../lib/sendEmail";
 import { claimEmailHtml } from "../../lib/emailTemplates";
 import { revalidatePath } from "next/cache";
-import { COLORS, pageWrap, heading, card, inputStyle, labelStyle, primaryBtn, dangerBtn, tabBtn, fontFamily } from "../../lib/theme";
+import { COLORS, pageWrap, heading, card, inputStyle, labelStyle, primaryBtn, dangerBtn, tabBtn, fontFamily, requestNumberStyle } from "../../lib/theme";
 import { statusLabel, cakeFormatLabel, travelDistanceLabel } from "../../lib/labels";
 
 async function requireAdmin() {
@@ -198,9 +198,10 @@ function PendingTab({ requests }) {
         const p = r.recipients;
         return (
           <div key={r.id} style={card}>
-            <p style={{ fontSize: 13, color: COLORS.inkSoft, fontFamily, marginTop: 0, marginBottom: 4 }}>
-              {submittedLabel(r.created_at)}
-            </p>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+              <span style={requestNumberStyle}>Request {r.request_number}</span>
+              <span style={{ fontSize: 13, color: COLORS.inkSoft, fontFamily }}>{submittedLabel(r.created_at)}</span>
+            </div>
             <form action={approveRequest}>
               <input type="hidden" name="id" value={r.id} />
               <input type="hidden" name="recipient_id" value={p.id} />
@@ -263,7 +264,8 @@ function UnclaimedTab({ requests, volunteers }) {
       {requests.length === 0 && <p style={{ color: COLORS.inkSoft }}>Nothing approved and waiting for a volunteer.</p>}
       {requests.map((r) => (
         <div key={r.id} style={card}>
-          <h3 style={{ ...heading, fontSize: 17, marginBottom: 6 }}>
+          <span style={requestNumberStyle}>Request {r.request_number}</span>
+          <h3 style={{ ...heading, fontSize: 17, margin: "8px 0 6px" }}>
             {r.recipient_first_name}, age {r.recipient_age} — {cakeFormatLabel(r.cake_or_cupcakes)}
           </h3>
           <p style={{ fontSize: 13, color: COLORS.inkSoft, marginBottom: 10 }}>
@@ -287,7 +289,8 @@ function ProgressTab({ requests, volunteers }) {
         const v = volunteers.find((v) => v.id === claim?.volunteer_id);
         return (
           <div key={r.id} style={card}>
-            <h3 style={{ ...heading, fontSize: 17, marginBottom: 6 }}>
+            <span style={requestNumberStyle}>Request {r.request_number}</span>
+            <h3 style={{ ...heading, fontSize: 17, margin: "8px 0 6px" }}>
               {r.recipient_first_name}, age {r.recipient_age} — {cakeFormatLabel(r.cake_or_cupcakes)}
             </h3>
             <p style={{ fontSize: 13, color: COLORS.inkSoft, marginBottom: 6 }}>

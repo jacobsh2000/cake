@@ -10,7 +10,7 @@ export async function GET() {
   const { data, error } = await supabase
     .from("requests")
     .select(`
-      id, status, requested_datetime, recipient_age, cake_or_cupcakes,
+      id, request_number, status, requested_datetime, recipient_age, cake_or_cupcakes,
       servings, cupcake_count, flavor_options, icing_options, interests,
       favorite_colors, has_allergies, allergy_severity,
       recipients ( city, zip_code )

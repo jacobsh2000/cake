@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useUser, UserButton } from "@clerk/nextjs";
-import { COLORS, pageWrap, heading, card, inputStyle, labelStyle, primaryBtn, outlineBtn, dangerBtn, tabBtn, fontFamily } from "../../lib/theme";
+import { COLORS, pageWrap, heading, card, inputStyle, labelStyle, primaryBtn, outlineBtn, dangerBtn, tabBtn, fontFamily, requestNumberStyle } from "../../lib/theme";
 import { statusLabel, cakeFormatLabel, TRAVEL_DISTANCE_OPTIONS } from "../../lib/labels";
 
 export default function VolunteerBoard() {
@@ -92,7 +92,8 @@ export default function VolunteerBoard() {
             {requests.length === 0 && <p style={{ color: COLORS.inkSoft }}>No open requests right now — check back soon!</p>}
             {requests.map((r) => (
               <div key={r.id} style={card}>
-                <h3 style={{ ...heading, fontSize: 18, marginBottom: 4 }}>
+                <span style={requestNumberStyle}>Request {r.request_number}</span>
+                <h3 style={{ ...heading, fontSize: 18, margin: "8px 0 4px" }}>
                   Age {r.recipient_age} — {cakeFormatLabel(r.cake_or_cupcakes)}
                   {r.has_allergies && <span style={{ color: COLORS.error, fontSize: 13, marginLeft: 8, fontFamily, fontWeight: 500 }}>⚠ Allergy: {r.allergy_severity}</span>}
                 </h3>
@@ -116,7 +117,8 @@ export default function VolunteerBoard() {
               const p = r.recipients;
               return (
                 <div key={c.id} style={card}>
-                  <h3 style={{ ...heading, fontSize: 18, marginBottom: 4 }}>{r.recipient_first_name}, age {r.recipient_age} — {cakeFormatLabel(r.cake_or_cupcakes)}</h3>
+                  <span style={requestNumberStyle}>Request {r.request_number}</span>
+                  <h3 style={{ ...heading, fontSize: 18, margin: "8px 0 4px" }}>{r.recipient_first_name}, age {r.recipient_age} — {cakeFormatLabel(r.cake_or_cupcakes)}</h3>
                   <p style={{ fontSize: 13, color: COLORS.inkSoft }}>Claimed {new Date(c.claimed_at).toLocaleDateString()}</p>
 
                   <div style={{ background: COLORS.bg, borderRadius: 10, padding: 14, margin: "12px 0", border: `1px solid ${COLORS.border}` }}>

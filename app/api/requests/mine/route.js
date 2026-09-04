@@ -19,7 +19,7 @@ export async function GET() {
     .select(`
       id, claimed_at, contacted_recipient_at, delivery_confirmed_at,
       requests (
-        id, status, requested_datetime, recipient_age, recipient_first_name,
+        id, request_number, status, requested_datetime, recipient_age, recipient_first_name,
         cake_or_cupcakes, servings, cupcake_count, flavor_options, icing_options,
         interests, favorite_colors, has_allergies, allergy_details, allergy_severity,
         photo_sharing_ok,

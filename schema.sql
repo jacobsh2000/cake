@@ -34,9 +34,16 @@ create type request_status as enum (
   'claimed', 'contacted', 'confirmed', 'delivered', 'expired'
 );
 
+-- Short, sequential handle for humans — "request 1042". The UUID stays
+-- the primary key; this exists so Emily and volunteers have something
+-- speakable. Starts at 1001 so early numbers don't read as a count.
+create sequence if not exists requests_request_number_seq as integer start with 1001;
+
 create table requests (
   id uuid primary key default gen_random_uuid(),
   recipient_id uuid not null references recipients(id) on delete cascade,
+
+  request_number integer not null unique default nextval('requests_request_number_seq'),
 
   status request_status not null default 'submitted',
 

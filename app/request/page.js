@@ -18,6 +18,13 @@ const OTHER = "Other";
 
 const MAX_CHOICES = 3;
 
+// A parent or guardian is already the person who grants permission, so
+// asking them to confirm they have their own permission is noise. The
+// checkbox only appears for anyone else — a teacher, a neighbour, an
+// aunt — where the question is real.
+const PARENT_GUARDIAN = "Parent/Guardian";
+const RELATIONSHIP_OTHER = "Other";
+
 // Returns YYYY-MM-DD in the visitor's own timezone. Built from local
 // date parts rather than toISOString(), which converts to UTC and would
 // push the cutoff a day late for anyone filling the form in the evening
@@ -44,7 +51,8 @@ export default function RequestPage() {
     phoneNumber: "", backupPhoneNumber: "",
     backupContactFirstName: "", backupContactLastName: "",
     preferredContactMethod: "phone",
-    relationshipToRecipient: "",
+    relationshipType: PARENT_GUARDIAN,
+    relationshipOther: "",
     guardianPermissionConfirmed: false,
     requestedDatetime: "",
     recipientAge: "",
@@ -61,6 +69,8 @@ export default function RequestPage() {
   });
   const [status, setStatus] = useState("idle");
   const [errorMsg, setErrorMsg] = useState("");
+
+  const isOther = form.relationshipType === RELATIONSHIP_OTHER;
 
   function update(field, value) {
     setForm((f) => ({ ...f, [field]: value }));
@@ -85,9 +95,25 @@ export default function RequestPage() {
       setErrorMsg(`Requested date must be at least ${MIN_NOTICE_DAYS} days from today.`);
       return;
     }
-    if (!form.termsAccepted || !form.guardianPermissionConfirmed) {
+    if (!form.termsAccepted) {
       setStatus("error");
-      setErrorMsg("Please confirm the terms and guardian permission before submitting.");
+      setErrorMsg("Please accept the terms of service before submitting.");
+      return;
+    }
+
+    // A parent/guardian IS the permission-giver, so consent is implied
+    // and recorded as such. Anyone else has to say so explicitly.
+    const relationshipToRecipient = isOther ? form.relationshipOther.trim() : PARENT_GUARDIAN;
+    const guardianPermissionConfirmed = isOther ? form.guardianPermissionConfirmed : true;
+
+    if (isOther && !relationshipToRecipient) {
+      setStatus("error");
+      setErrorMsg("Please tell us how you know the recipient.");
+      return;
+    }
+    if (isOther && !guardianPermissionConfirmed) {
+      setStatus("error");
+      setErrorMsg("Please confirm you have the parent or guardian's permission before submitting.");
       return;
     }
 
@@ -102,7 +128,13 @@ export default function RequestPage() {
     const res = await fetch("/api/submit-request", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...form, flavorOptions, icingOptions }),
+      body: JSON.stringify({
+        ...form,
+        flavorOptions,
+        icingOptions,
+        relationshipToRecipient,
+        guardianPermissionConfirmed,
+      }),
     });
 
     if (!res.ok) {
@@ -176,13 +208,29 @@ export default function RequestPage() {
               options={[["phone", "Phone call"], ["text", "Text"], ["email", "Email"]]}
             />
 
-            <Field label="Your relationship to the cake recipient" value={form.relationshipToRecipient} onChange={(v) => update("relationshipToRecipient", v)} required />
-
-            <Checkbox
-              label="I confirm I have received permission from the parent/guardian to request a cake/cupcakes."
-              checked={form.guardianPermissionConfirmed}
-              onChange={(v) => update("guardianPermissionConfirmed", v)}
+            <SelectField
+              label="Your relationship to the cake recipient"
+              value={form.relationshipType}
+              onChange={(v) => update("relationshipType", v)}
+              options={[[PARENT_GUARDIAN, "Parent or guardian"], [RELATIONSHIP_OTHER, "Someone else"]]}
             />
+
+            {isOther && (
+              <>
+                <Field
+                  label="How do you know the recipient?"
+                  hint="For example: aunt, teacher, neighbour, caseworker"
+                  value={form.relationshipOther}
+                  onChange={(v) => update("relationshipOther", v)}
+                  required
+                />
+                <Checkbox
+                  label="I confirm I have received permission from the parent/guardian to request a cake/cupcakes."
+                  checked={form.guardianPermissionConfirmed}
+                  onChange={(v) => update("guardianPermissionConfirmed", v)}
+                />
+              </>
+            )}
           </Section>
 
           <Section number={2} title="Cake details">
