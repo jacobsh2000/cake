@@ -7,6 +7,7 @@ import { revalidatePath } from "next/cache";
 import { COLORS, pageWrap, heading, card, inputStyle, labelStyle, primaryBtn, outlineBtn, dangerBtn, tabBtn, fontFamily, requestNumberStyle } from "../../lib/theme";
 import { statusLabel, cakeFormatLabel, travelDistanceLabel } from "../../lib/labels";
 import { formatDateTime, orgLocalToUtcIso, utcToOrgLocalInput } from "../../lib/datetime";
+import { SORT_OPTIONS, matchesQuery, sortRequests } from "../../lib/filters";
 
 async function requireAdmin() {
   const { userId } = auth();
@@ -225,9 +226,31 @@ async function assignVolunteer(formData) {
 
 // ==================== page ====================
 
+// Filtering lives in the URL rather than in component state, matching
+// how the tabs already work: /admin?tab=progress&q=43215&sort=oldest is
+// a link Emily can bookmark or paste to someone else, and it survives
+// the page re-rendering after every approve or assign.
+function applyFilters(requests, { q, sort, status }) {
+  return sortRequests(
+    requests.filter((r) => {
+      if (status && r.status !== status) return false;
+      const p = r.recipients || {};
+      return matchesQuery(
+        [`request ${r.request_number}`, r.recipient_first_name, p.city, p.zip_code,
+         p.state, p.first_name, p.last_name, r.interests, r.favorite_colors],
+        q,
+      );
+    }),
+    sort,
+  );
+}
+
 export default async function AdminPage({ searchParams }) {
   await requireAdmin();
   const tab = searchParams?.tab || "pending";
+  const q = searchParams?.q || "";
+  const sort = searchParams?.sort || "soonest";
+  const status = searchParams?.status || "";
   const supabase = createAdminClient();
 
   const [pending, unclaimed, inProgress, volunteers] = await Promise.all([
@@ -237,22 +260,72 @@ export default async function AdminPage({ searchParams }) {
     getVolunteerOptions(supabase),
   ]);
 
+  // Pending review is a queue worked oldest-first, so it keeps its own
+  // ordering and only takes the text filter.
+  const shownPending = applyFilters(pending, { q, sort: "oldest" });
+  const shownUnclaimed = applyFilters(unclaimed, { q, sort });
+  const shownProgress = applyFilters(inProgress, { q, sort, status });
+
+  const counts = { pending: pending.length, unclaimed: unclaimed.length, progress: inProgress.length };
+  const shownCount = { pending: shownPending.length, unclaimed: shownUnclaimed.length, progress: shownProgress.length }[tab];
+
   return (
     <div style={pageWrap}>
       <div style={{ maxWidth: 820, margin: "0 auto", width: "100%" }}>
         <h1 style={{ ...heading, fontSize: 28, marginBottom: 20 }}>Admin dashboard</h1>
 
         <div style={{ display: "flex", gap: 8, marginBottom: 24, borderBottom: `1px solid ${COLORS.border}` }}>
-          <a href="/admin?tab=pending" style={{ textDecoration: "none" }}><span style={tabBtn(tab === "pending")}>Pending review ({pending.length})</span></a>
-          <a href="/admin?tab=unclaimed" style={{ textDecoration: "none" }}><span style={tabBtn(tab === "unclaimed")}>Approved — no volunteer ({unclaimed.length})</span></a>
-          <a href="/admin?tab=progress" style={{ textDecoration: "none" }}><span style={tabBtn(tab === "progress")}>In progress ({inProgress.length})</span></a>
+          <a href="/admin?tab=pending" style={{ textDecoration: "none" }}><span style={tabBtn(tab === "pending")}>Pending review ({counts.pending})</span></a>
+          <a href="/admin?tab=unclaimed" style={{ textDecoration: "none" }}><span style={tabBtn(tab === "unclaimed")}>Approved — no volunteer ({counts.unclaimed})</span></a>
+          <a href="/admin?tab=progress" style={{ textDecoration: "none" }}><span style={tabBtn(tab === "progress")}>In progress ({counts.progress})</span></a>
         </div>
 
-        {tab === "pending" && <PendingTab requests={pending} />}
-        {tab === "unclaimed" && <UnclaimedTab requests={unclaimed} volunteers={volunteers} />}
-        {tab === "progress" && <ProgressTab requests={inProgress} volunteers={volunteers} />}
+        <FilterBar tab={tab} q={q} sort={sort} status={status} shown={shownCount} total={counts[tab]} />
+
+        {tab === "pending" && <PendingTab requests={shownPending} />}
+        {tab === "unclaimed" && <UnclaimedTab requests={shownUnclaimed} volunteers={volunteers} />}
+        {tab === "progress" && <ProgressTab requests={shownProgress} volunteers={volunteers} />}
       </div>
     </div>
+  );
+}
+
+// A plain GET form — no client component needed, and the result is a
+// real URL. Sorting is hidden on the pending queue, which is always
+// worked oldest-first; the status filter only means anything among the
+// several in-progress statuses.
+function FilterBar({ tab, q, sort, status, shown, total }) {
+  const compact = { ...inputStyle, marginBottom: 0 };
+  return (
+    <form method="get" action="/admin" style={{ ...card, padding: 16, marginBottom: 16 }}>
+      <input type="hidden" name="tab" value={tab} />
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr auto", gap: 8, alignItems: "center" }}>
+        <input name="q" defaultValue={q} placeholder="Search name, city, zip, request number" style={compact} />
+        {tab === "progress" ? (
+          <select name="status" defaultValue={status} style={compact}>
+            <option value="">Any status</option>
+            {IN_PROGRESS_STATUSES.map((s) => <option key={s} value={s}>{statusLabel(s)}</option>)}
+          </select>
+        ) : tab === "unclaimed" ? (
+          <select name="sort" defaultValue={sort} style={compact}>
+            {SORT_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        ) : <span />}
+        <button type="submit" style={primaryBtn()}>Apply</button>
+      </div>
+      {tab === "progress" && (
+        <div style={{ marginTop: 8 }}>
+          <select name="sort" defaultValue={sort} style={{ ...compact, maxWidth: 240 }}>
+            {SORT_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </div>
+      )}
+      {(q || status) && (
+        <p style={{ fontSize: 12, color: COLORS.inkSoft, fontFamily, margin: "10px 0 0" }}>
+          Showing {shown} of {total}. <a href={`/admin?tab=${tab}`} style={{ color: COLORS.berry }}>Clear filters</a>
+        </p>
+      )}
+    </form>
   );
 }
 

@@ -5,6 +5,10 @@ import { useUser, UserButton } from "@clerk/nextjs";
 import { COLORS, pageWrap, heading, card, inputStyle, labelStyle, primaryBtn, outlineBtn, dangerBtn, tabBtn, fontFamily, requestNumberStyle } from "../../lib/theme";
 import { statusLabel, cakeFormatLabel, TRAVEL_DISTANCE_OPTIONS } from "../../lib/labels";
 import { formatDateTime } from "../../lib/datetime";
+import {
+  SORT_OPTIONS, CAKE_FILTER_OPTIONS, ALLERGY_FILTER_OPTIONS,
+  matchesCakeFormat, matchesAllergy, matchesQuery, sortRequests,
+} from "../../lib/filters";
 
 export default function VolunteerBoard() {
   const { user, isLoaded } = useUser();
@@ -13,6 +17,20 @@ export default function VolunteerBoard() {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("open");
+  const [filters, setFilters] = useState({ q: "", format: "", allergy: "", sort: "soonest" });
+
+  const visibleRequests = sortRequests(
+    requests.filter((r) =>
+      matchesCakeFormat(r.cake_or_cupcakes, filters.format) &&
+      matchesAllergy(r, filters.allergy) &&
+      matchesQuery(
+        [r.general_area, r.interests, r.favorite_colors, `request ${r.request_number}`,
+         r.flavor_options?.join(" "), r.icing_options?.join(" ")],
+        filters.q,
+      )
+    ),
+    filters.sort,
+  );
 
   useEffect(() => {
     if (isLoaded && user) loadAll();
@@ -90,8 +108,17 @@ export default function VolunteerBoard() {
 
         {!loading && tab === "open" && (
           <>
+            <OpenFilters filters={filters} setFilters={setFilters} shown={visibleRequests.length} total={requests.length} />
             {requests.length === 0 && <p style={{ color: COLORS.inkSoft }}>No open requests right now — check back soon!</p>}
-            {requests.map((r) => (
+            {requests.length > 0 && visibleRequests.length === 0 && (
+              <p style={{ color: COLORS.inkSoft }}>
+                No open requests match these filters.{" "}
+                <button onClick={() => setFilters({ q: "", format: "", allergy: "", sort: "soonest" })} style={{ ...outlineBtn(), marginLeft: 4 }}>
+                  Clear filters
+                </button>
+              </p>
+            )}
+            {visibleRequests.map((r) => (
               <div key={r.id} style={card}>
                 <span style={requestNumberStyle}>Request {r.request_number}</span>
                 <h3 style={{ ...heading, fontSize: 18, margin: "8px 0 4px" }}>
@@ -174,6 +201,45 @@ export default function VolunteerBoard() {
 
         {!loading && tab === "profile" && <ProfileForm profile={profile} onSaved={loadAll} />}
       </div>
+    </div>
+  );
+}
+
+function OpenFilters({ filters, setFilters, shown, total }) {
+  const set = (key) => (e) => setFilters((f) => ({ ...f, [key]: e.target.value }));
+  const compact = { ...inputStyle, marginBottom: 0 };
+  const isFiltered = filters.q || filters.format || filters.allergy;
+
+  return (
+    <div style={{ ...card, padding: 16, marginBottom: 16 }}>
+      <input
+        value={filters.q}
+        onChange={set("q")}
+        placeholder="Search area, zip, interests, colors, flavors, request number"
+        style={{ ...compact, marginBottom: 10 }}
+      />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
+        <select value={filters.format} onChange={set("format")} style={compact}>
+          {CAKE_FILTER_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        <select value={filters.allergy} onChange={set("allergy")} style={compact}>
+          {ALLERGY_FILTER_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        <select value={filters.sort} onChange={set("sort")} style={compact}>
+          {SORT_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+      </div>
+      {isFiltered && (
+        <p style={{ fontSize: 12, color: COLORS.inkSoft, fontFamily, margin: "10px 0 0" }}>
+          Showing {shown} of {total} open requests.{" "}
+          <button
+            onClick={() => setFilters({ q: "", format: "", allergy: "", sort: filters.sort })}
+            style={{ background: "none", border: "none", padding: 0, color: COLORS.berry, cursor: "pointer", fontFamily, fontSize: 12, textDecoration: "underline" }}
+          >
+            Clear
+          </button>
+        </p>
+      )}
     </div>
   );
 }

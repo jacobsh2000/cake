@@ -30,10 +30,6 @@ file or a sentence that doesn't exist in the repo yet.
   "rejected" (which is pre-approval). This one is for an already-posted
   or claimed request that has to come down.
 - Volunteer role on a claim: making/buying, delivering, or both.
-- Search and filter on the volunteer open-requests board (area, cake vs
-  cupcakes, allergies).
-- Filter and sort on the admin dashboard (status, zip, area; order by
-  days until event).
 - Expand the volunteer profile with interests / cause preferences.
 - Require admin approval of new volunteer signups before they can
   claim. Needs an `approved` flag, a review UI, and gating the claim.
