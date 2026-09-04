@@ -3,14 +3,7 @@
 import { useEffect, useState } from "react";
 import { useUser, UserButton } from "@clerk/nextjs";
 import { COLORS, pageWrap, heading, card, inputStyle, labelStyle, primaryBtn, outlineBtn, dangerBtn, tabBtn, fontFamily } from "../../lib/theme";
-
-const STATUS_LABELS = {
-  claimed: "Claimed — not yet contacted",
-  contacted: "Contacted recipient",
-  confirmed: "Confirmed delivery day/time",
-  no_response: "No response from recipient",
-  delivered: "Delivered",
-};
+import { statusLabel, cakeFormatLabel, TRAVEL_DISTANCE_OPTIONS } from "../../lib/labels";
 
 export default function VolunteerBoard() {
   const { user, isLoaded } = useUser();
@@ -37,7 +30,10 @@ export default function VolunteerBoard() {
     setLoading(false);
   }
 
-  async function claim(requestId) {
+  async function claim(request) {
+    const when = new Date(`${request.requested_datetime}T00:00:00`).toLocaleDateString();
+    if (!confirm(`Claim this request? You'll be committing to a ${cakeFormatLabel(request.cake_or_cupcakes)} needed by ${when}, and the recipient's contact details will be shared with you.`)) return;
+    const requestId = request.id;
     const res = await fetch("/api/requests/claim", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -97,7 +93,7 @@ export default function VolunteerBoard() {
             {requests.map((r) => (
               <div key={r.id} style={card}>
                 <h3 style={{ ...heading, fontSize: 18, marginBottom: 4 }}>
-                  Age {r.recipient_age} — {r.cake_or_cupcakes}
+                  Age {r.recipient_age} — {cakeFormatLabel(r.cake_or_cupcakes)}
                   {r.has_allergies && <span style={{ color: COLORS.error, fontSize: 13, marginLeft: 8, fontFamily, fontWeight: 500 }}>⚠ Allergy: {r.allergy_severity}</span>}
                 </h3>
                 {r.general_area && <p style={{ fontSize: 13, color: COLORS.gold, fontWeight: 600 }}>📍 {r.general_area}</p>}
@@ -106,7 +102,7 @@ export default function VolunteerBoard() {
                 {r.interests && <p style={pText}><strong>Interests:</strong> {r.interests}</p>}
                 {r.favorite_colors && <p style={pText}><strong>Favorite colors:</strong> {r.favorite_colors}</p>}
                 <p style={{ fontSize: 13, color: COLORS.inkSoft }}>Recipient name, address, and phone are revealed once you claim this request.</p>
-                <button onClick={() => claim(r.id)} style={primaryBtn({ marginTop: 8 })}>Claim this request</button>
+                <button onClick={() => claim(r)} style={primaryBtn({ marginTop: 8 })}>Claim this request</button>
               </div>
             ))}
           </>
@@ -120,7 +116,7 @@ export default function VolunteerBoard() {
               const p = r.recipients;
               return (
                 <div key={c.id} style={card}>
-                  <h3 style={{ ...heading, fontSize: 18, marginBottom: 4 }}>{r.recipient_first_name}, age {r.recipient_age} — {r.cake_or_cupcakes}</h3>
+                  <h3 style={{ ...heading, fontSize: 18, marginBottom: 4 }}>{r.recipient_first_name}, age {r.recipient_age} — {cakeFormatLabel(r.cake_or_cupcakes)}</h3>
                   <p style={{ fontSize: 13, color: COLORS.inkSoft }}>Claimed {new Date(c.claimed_at).toLocaleDateString()}</p>
 
                   <div style={{ background: COLORS.bg, borderRadius: 10, padding: 14, margin: "12px 0", border: `1px solid ${COLORS.border}` }}>
@@ -144,7 +140,7 @@ export default function VolunteerBoard() {
 
                   <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${COLORS.border}` }}>
                     <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, fontFamily }}>
-                      Status: <span style={{ color: COLORS.berry }}>{STATUS_LABELS[r.status] || r.status}</span>
+                      Status: <span style={{ color: COLORS.berry }}>{statusLabel(r.status)}</span>
                     </p>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
                       <button style={outlineBtn()} onClick={() => updateStatus(r.id, "contacted")}>Contacted recipient</button>
@@ -170,12 +166,14 @@ function ProfileForm({ profile, onSaved }) {
   const [city, setCity] = useState(profile?.city || "");
   const [state, setState] = useState(profile?.state || "");
   const [frequency, setFrequency] = useState(profile?.volunteer_frequency || "");
+  const [travelDistance, setTravelDistance] = useState(profile?.travel_distance || "");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setCity(profile?.city || "");
     setState(profile?.state || "");
     setFrequency(profile?.volunteer_frequency || "");
+    setTravelDistance(profile?.travel_distance || "");
   }, [profile]);
 
   async function save(e) {
@@ -184,7 +182,7 @@ function ProfileForm({ profile, onSaved }) {
     await fetch("/api/volunteer/profile", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ city, state, volunteerFrequency: frequency }),
+      body: JSON.stringify({ city, state, volunteerFrequency: frequency, travelDistance }),
     });
     setSaving(false);
     onSaved();
@@ -203,6 +201,13 @@ function ProfileForm({ profile, onSaved }) {
         <option value="weekly">As often as possible (weekly)</option>
         <option value="monthly">A few times a month</option>
         <option value="occasionally">Occasionally</option>
+      </select>
+      <label style={labelStyle}>How far are you willing to travel to deliver?</label>
+      <select value={travelDistance} onChange={(e) => setTravelDistance(e.target.value)} style={inputStyle}>
+        <option value="">Select one</option>
+        {TRAVEL_DISTANCE_OPTIONS.map(([value, label]) => (
+          <option key={value} value={value}>{label}</option>
+        ))}
       </select>
       <button type="submit" disabled={saving} style={primaryBtn()}>{saving ? "Saving..." : "Save"}</button>
     </form>

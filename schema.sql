@@ -84,6 +84,7 @@ create table volunteer_profiles (
   state text,
   general_area text,                                   -- coarse location for matching, no street address needed
   volunteer_frequency text,                            -- how often they want to volunteer
+  travel_distance text,                                -- '0_5' | '5_10' | '10_20' | '20_plus' miles willing to drive
   created_at timestamptz not null default now()
 );
 

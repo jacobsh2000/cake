@@ -36,6 +36,7 @@ export async function POST(req) {
     state: body.state || null,
     general_area: body.city && body.state ? `${body.city}, ${body.state}` : null,
     volunteer_frequency: body.volunteerFrequency || null,
+    travel_distance: body.travelDistance || null,
   });
 
   if (error) {

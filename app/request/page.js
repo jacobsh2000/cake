@@ -3,8 +3,38 @@
 import { useState } from "react";
 import { COLORS } from "../../lib/theme";
 
-const FLAVORS = ["Vanilla", "Chocolate", "Funfetti", "Red Velvet", "Lemon", "Marble"];
-const ICINGS = ["Buttercream", "Cream Cheese", "Chocolate Ganache", "Whipped"];
+// Requests need this much lead time. Used for validation, the date
+// input's min attribute, and the copy in both places it's mentioned —
+// change it here only.
+const MIN_NOTICE_DAYS = 10;
+
+const FLAVORS = ["White/Vanilla", "Chocolate", "Yellow", "Strawberry", "Marble"];
+const ICINGS = ["Vanilla Buttercream", "Chocolate"];
+
+// Selecting this pill reveals a write-in field; on submit the typed
+// value replaces it in the submitted array, so "Other" itself is never
+// stored as a flavor or icing.
+const OTHER = "Other";
+
+const MAX_CHOICES = 3;
+
+// Returns YYYY-MM-DD in the visitor's own timezone. Built from local
+// date parts rather than toISOString(), which converts to UTC and would
+// push the cutoff a day late for anyone filling the form in the evening
+// west of Greenwich.
+function todayPlus(days) {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// Merges the write-in value into the chosen options, dropping the
+// "Other" placeholder itself.
+function resolveOptions(selected, otherText) {
+  const base = selected.filter((v) => v !== OTHER);
+  const typed = otherText.trim();
+  return selected.includes(OTHER) && typed ? [...base, typed] : base;
+}
 
 export default function RequestPage() {
   const [form, setForm] = useState({
@@ -21,7 +51,8 @@ export default function RequestPage() {
     recipientFirstName: "",
     cakeOrCupcakes: "cake",
     servings: "", cupcakeCount: "",
-    flavorOptions: [], icingOptions: [],
+    flavorOptions: [], flavorOther: "",
+    icingOptions: [], icingOther: "",
     interests: "", favoriteColors: "",
     hasAllergies: false, allergyDetails: "", allergySeverity: "",
     photoSharingOk: false,
@@ -49,12 +80,9 @@ export default function RequestPage() {
     setStatus("submitting");
     setErrorMsg("");
 
-    const requestedDate = new Date(form.requestedDatetime);
-    const minDate = new Date();
-    minDate.setDate(minDate.getDate() + 5);
-    if (requestedDate < minDate) {
+    if (form.requestedDatetime < todayPlus(MIN_NOTICE_DAYS)) {
       setStatus("error");
-      setErrorMsg("Requested date must be at least 5 days from today.");
+      setErrorMsg(`Requested date must be at least ${MIN_NOTICE_DAYS} days from today.`);
       return;
     }
     if (!form.termsAccepted || !form.guardianPermissionConfirmed) {
@@ -63,10 +91,18 @@ export default function RequestPage() {
       return;
     }
 
+    const flavorOptions = resolveOptions(form.flavorOptions, form.flavorOther);
+    const icingOptions = resolveOptions(form.icingOptions, form.icingOther);
+    if (flavorOptions.length === 0 || icingOptions.length === 0) {
+      setStatus("error");
+      setErrorMsg("Please choose at least one flavor and one frosting. If you picked \"Other,\" fill in the write-in box.");
+      return;
+    }
+
     const res = await fetch("/api/submit-request", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
+      body: JSON.stringify({ ...form, flavorOptions, icingOptions }),
     });
 
     if (!res.ok) {
@@ -102,8 +138,8 @@ export default function RequestPage() {
           </h1>
           <p style={{ ...bodyText, maxWidth: 440, margin: "0 auto" }}>
             Every child deserves a birthday cake. Tell us a little about the celebration —
-            requests need at least 5 days' notice, and everything you share stays private
-            until a volunteer is matched.
+            requests need at least {MIN_NOTICE_DAYS} days' notice, and everything you share
+            stays private until a volunteer is matched.
           </p>
         </header>
 
@@ -151,7 +187,7 @@ export default function RequestPage() {
 
           <Section number={2} title="Cake details">
             <Row>
-              <Field label="Requested delivery date" hint="At least 5 days out" type="date" value={form.requestedDatetime} onChange={(v) => update("requestedDatetime", v)} required />
+              <Field label="Requested delivery date" hint={`At least ${MIN_NOTICE_DAYS} days out`} type="date" min={todayPlus(MIN_NOTICE_DAYS)} value={form.requestedDatetime} onChange={(v) => update("requestedDatetime", v)} required />
               <Field label="Age of cake recipient" type="number" value={form.recipientAge} onChange={(v) => update("recipientAge", v)} required />
             </Row>
             <Field label="First name of cake recipient" value={form.recipientFirstName} onChange={(v) => update("recipientFirstName", v)} required />
@@ -160,17 +196,45 @@ export default function RequestPage() {
               label="Cake or cupcakes?"
               value={form.cakeOrCupcakes}
               onChange={(v) => update("cakeOrCupcakes", v)}
-              options={[["cake", "Cake"], ["cupcakes", "Cupcakes"]]}
+              options={[["cake", "Cake"], ["cupcakes", "Cupcakes"], ["no_preference", "No preference — either is great"]]}
             />
 
-            {form.cakeOrCupcakes === "cake" ? (
-              <Field label="Servings" hint="Max 16" type="number" max={16} value={form.servings} onChange={(v) => update("servings", v)} required />
-            ) : (
+            {/* Cupcakes get their own count; cake and no-preference both
+                record servings, since the volunteer decides the format. */}
+            {form.cakeOrCupcakes === "cupcakes" ? (
               <Field label="Cupcake count" hint="Max 24" type="number" max={24} value={form.cupcakeCount} onChange={(v) => update("cupcakeCount", v)} required />
+            ) : (
+              <Field
+                label={form.cakeOrCupcakes === "no_preference" ? "How many people need to be served?" : "Servings"}
+                hint={form.cakeOrCupcakes === "no_preference" ? "Max 16 for a cake, or 24 cupcakes" : "Max 16"}
+                type="number"
+                max={form.cakeOrCupcakes === "no_preference" ? 24 : 16}
+                value={form.servings}
+                onChange={(v) => update("servings", v)}
+                required
+              />
             )}
 
-            <PillSelect label="Flavor options" hint="Choose up to 3 — our volunteer will pick one" options={FLAVORS} selected={form.flavorOptions} onToggle={(v) => toggleMulti("flavorOptions", v, 3)} />
-            <PillSelect label="Icing options" hint="Choose up to 3" options={ICINGS} selected={form.icingOptions} onToggle={(v) => toggleMulti("icingOptions", v, 3)} />
+            <PillSelect
+              label="Flavor options"
+              hint={`Choose up to ${MAX_CHOICES} — our volunteer will pick one`}
+              options={[...FLAVORS, OTHER]}
+              selected={form.flavorOptions}
+              onToggle={(v) => toggleMulti("flavorOptions", v, MAX_CHOICES)}
+              otherValue={form.flavorOther}
+              onOtherChange={(v) => update("flavorOther", v)}
+              otherPlaceholder="Tell us the flavor you'd like"
+            />
+            <PillSelect
+              label="Frosting options"
+              hint={`Choose up to ${MAX_CHOICES}`}
+              options={[...ICINGS, OTHER]}
+              selected={form.icingOptions}
+              onToggle={(v) => toggleMulti("icingOptions", v, MAX_CHOICES)}
+              otherValue={form.icingOther}
+              onOtherChange={(v) => update("icingOther", v)}
+              otherPlaceholder="Tell us the frosting you'd like"
+            />
 
             <TextAreaField
               label="Interests"
@@ -313,7 +377,7 @@ function FieldLabel({ label, hint }) {
   );
 }
 
-function Field({ label, hint, value, onChange, type = "text", required = false, max }) {
+function Field({ label, hint, value, onChange, type = "text", required = false, max, min }) {
   return (
     <div>
       <FieldLabel label={label} hint={hint} />
@@ -321,6 +385,7 @@ function Field({ label, hint, value, onChange, type = "text", required = false, 
         type={type}
         value={value}
         max={max}
+        min={min}
         required={required}
         onChange={(e) => onChange(e.target.value)}
         style={inputBase}
@@ -365,7 +430,7 @@ function Checkbox({ label, checked, onChange }) {
   );
 }
 
-function PillSelect({ label, hint, options, selected, onToggle }) {
+function PillSelect({ label, hint, options, selected, onToggle, otherValue, onOtherChange, otherPlaceholder }) {
   return (
     <div style={{ marginBottom: 16 }}>
       <FieldLabel label={label} hint={hint} />
@@ -395,6 +460,15 @@ function PillSelect({ label, hint, options, selected, onToggle }) {
           );
         })}
       </div>
+
+      {selected.includes(OTHER) && onOtherChange && (
+        <input
+          value={otherValue}
+          onChange={(e) => onOtherChange(e.target.value)}
+          placeholder={otherPlaceholder}
+          style={{ ...inputBase, marginTop: 10, marginBottom: 0 }}
+        />
+      )}
     </div>
   );
 }

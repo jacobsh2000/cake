@@ -5,6 +5,7 @@ import { sendEmail } from "../../lib/sendEmail";
 import { claimEmailHtml } from "../../lib/emailTemplates";
 import { revalidatePath } from "next/cache";
 import { COLORS, pageWrap, heading, card, inputStyle, labelStyle, primaryBtn, dangerBtn, tabBtn, fontFamily } from "../../lib/theme";
+import { statusLabel, cakeFormatLabel, travelDistanceLabel } from "../../lib/labels";
 
 async function requireAdmin() {
   const { userId } = auth();
@@ -14,16 +15,20 @@ async function requireAdmin() {
 }
 
 const IN_PROGRESS_STATUSES = ["claimed", "contacted", "confirmed", "no_response", "delivered"];
-const STATUS_LABELS = {
-  claimed: "Claimed — not yet contacted",
-  contacted: "Contacted recipient",
-  confirmed: "Confirmed delivery day/time",
-  no_response: "No response from recipient",
-  delivered: "Delivered",
-};
+
+const CAKE_FORMAT_OPTIONS = [["cake", "Cake"], ["cupcakes", "Cupcakes"], ["no_preference", "No preference"]];
 
 function num(v) { return v === "" || v === null || v === undefined ? null : Number(v); }
 function splitList(v) { return (v || "").split(",").map((s) => s.trim()).filter(Boolean); }
+
+// "Submitted Mar 4, 2026 · 3 days ago" for the review queue, so Emily
+// can see at a glance what's been waiting longest.
+function submittedLabel(createdAt) {
+  const date = new Date(createdAt);
+  const days = Math.floor((Date.now() - date.getTime()) / 86400000);
+  const ago = days === 0 ? "today" : days === 1 ? "1 day ago" : `${days} days ago`;
+  return `Submitted ${date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })} · ${ago}`;
+}
 
 // ==================== data loaders ====================
 
@@ -47,7 +52,7 @@ async function getInProgressRequests(supabase) {
 }
 
 async function getVolunteerOptions(supabase) {
-  const { data } = await supabase.from("volunteer_profiles").select("id, first_name, last_name, city, state").order("first_name");
+  const { data } = await supabase.from("volunteer_profiles").select("id, first_name, last_name, city, state, travel_distance").order("first_name");
   return data || [];
 }
 
@@ -193,6 +198,9 @@ function PendingTab({ requests }) {
         const p = r.recipients;
         return (
           <div key={r.id} style={card}>
+            <p style={{ fontSize: 13, color: COLORS.inkSoft, fontFamily, marginTop: 0, marginBottom: 4 }}>
+              {submittedLabel(r.created_at)}
+            </p>
             <form action={approveRequest}>
               <input type="hidden" name="id" value={r.id} />
               <input type="hidden" name="recipient_id" value={p.id} />
@@ -215,8 +223,8 @@ function PendingTab({ requests }) {
               <Row><TextField name="requested_datetime" label="Requested date" type="date" defaultValue={r.requested_datetime} /><TextField name="child_age" label="Child's age" type="number" defaultValue={r.recipient_age} /></Row>
               <TextField name="child_first_name" label="Child's first name" defaultValue={r.recipient_first_name} />
               <Row>
-                <SelectField name="cake_or_cupcakes" label="Cake or cupcakes" defaultValue={r.cake_or_cupcakes} options={[["cake", "Cake"], ["cupcakes", "Cupcakes"]]} />
-                {r.cake_or_cupcakes === "cake" ? <TextField name="servings" label="Servings (max 16)" type="number" defaultValue={r.servings} /> : <TextField name="cupcake_count" label="Cupcake count (max 24)" type="number" defaultValue={r.cupcake_count} />}
+                <SelectField name="cake_or_cupcakes" label="Cake or cupcakes" defaultValue={r.cake_or_cupcakes} options={CAKE_FORMAT_OPTIONS} />
+                {r.cake_or_cupcakes === "cupcakes" ? <TextField name="cupcake_count" label="Cupcake count (max 24)" type="number" defaultValue={r.cupcake_count} /> : <TextField name="servings" label="Servings (max 16)" type="number" defaultValue={r.servings} />}
               </Row>
               <TextField name="flavor_options" label="Flavor options" hint="comma-separated" defaultValue={r.flavor_options?.join(", ")} />
               <TextField name="icing_options" label="Icing options" hint="comma-separated" defaultValue={r.icing_options?.join(", ")} />
@@ -256,7 +264,7 @@ function UnclaimedTab({ requests, volunteers }) {
       {requests.map((r) => (
         <div key={r.id} style={card}>
           <h3 style={{ ...heading, fontSize: 17, marginBottom: 6 }}>
-            {r.recipient_first_name}, age {r.recipient_age} — {r.cake_or_cupcakes}
+            {r.recipient_first_name}, age {r.recipient_age} — {cakeFormatLabel(r.cake_or_cupcakes)}
           </h3>
           <p style={{ fontSize: 13, color: COLORS.inkSoft, marginBottom: 10 }}>
             📍 {r.recipients.city}, {r.recipients.zip_code} · Needed by {r.requested_datetime}
@@ -280,14 +288,14 @@ function ProgressTab({ requests, volunteers }) {
         return (
           <div key={r.id} style={card}>
             <h3 style={{ ...heading, fontSize: 17, marginBottom: 6 }}>
-              {r.recipient_first_name}, age {r.recipient_age} — {r.cake_or_cupcakes}
+              {r.recipient_first_name}, age {r.recipient_age} — {cakeFormatLabel(r.cake_or_cupcakes)}
             </h3>
             <p style={{ fontSize: 13, color: COLORS.inkSoft, marginBottom: 6 }}>
               📍 {r.recipients.city}, {r.recipients.zip_code} · Needed by {r.requested_datetime}
             </p>
             <p style={{ fontSize: 14, marginBottom: 10 }}>
               <strong>Volunteer:</strong> {v ? `${v.first_name} ${v.last_name}`.trim() || v.id : "Unknown"} &nbsp;·&nbsp;
-              <strong>Status:</strong> <span style={{ color: COLORS.berry }}>{STATUS_LABELS[r.status] || r.status}</span>
+              <strong>Status:</strong> <span style={{ color: COLORS.berry }}>{statusLabel(r.status)}</span>
             </p>
             <AssignForm requestId={r.id} volunteers={volunteers} buttonLabel="Reassign to different volunteer" currentVolunteerId={claim?.volunteer_id} />
           </div>
@@ -305,7 +313,7 @@ function AssignForm({ requestId, volunteers, buttonLabel, currentVolunteerId }) 
         <option value="">Select a volunteer…</option>
         {volunteers.map((v) => (
           <option key={v.id} value={v.id}>
-            {`${v.first_name} ${v.last_name}`.trim() || v.id}{v.city ? ` — ${v.city}` : ""}
+            {`${v.first_name} ${v.last_name}`.trim() || v.id}{v.city ? ` — ${v.city}` : ""}{v.travel_distance ? ` (travels ${travelDistanceLabel(v.travel_distance)})` : ""}
           </option>
         ))}
       </select>
