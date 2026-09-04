@@ -31,16 +31,34 @@ file or a sentence that doesn't exist in the repo yet.
   rather than creating password accounts. Blocked on the SignUp Genius
   export and a Clerk secret key.
 
-## Hard — not started
+## Hard — in progress
 
-Automated reminder emails, the 48-hour reassignment timer, new-request
-notification emails with per-volunteer opt-out, accept/decline on
-admin-assigned claims, true multi-volunteer requests, travel-radius map
-visualization, address-within-30-miles validation at submission, and
-the daily digest email to Emily. Several of these share one piece of
-missing infrastructure: a scheduled job (Vercel Cron or a Supabase
-Edge Function). Worth building that once, deliberately, rather than
-per-feature.
+The scheduled-job infrastructure now exists: one daily Vercel Cron at
+`/api/cron/daily`, with `job_runs` for observability and
+`notifications_sent` for at-least-once-safe dedup. The daily digest to
+Emily runs on it. Adding a job is now writing one function in
+`lib/jobs/` and one line in the route.
+
+Still to build on it, in rough order of value:
+
+- **Volunteer reminders.** Delivery under 5 days away and not marked
+  confirmed; and the day after the delivery date, not marked
+  delivered. Both use `claimNotification` for dedup. Worth waiting a
+  week of clean digest runs first — a date-math bug here reaches every
+  volunteer rather than one admin.
+- **48-hour reassignment timer.** Auto-revert a claim with no activity
+  back to posted. Needs a decision on whether it emails the volunteer
+  first as a warning, or just acts.
+- **New-request notification emails** to volunteers whose area and
+  preferences match a newly-approved request. Event-driven rather than
+  scheduled — belongs on approval, not in the cron. Needs a
+  per-volunteer opt-out toggle.
+- **Accept/decline on admin-assigned claims** — declining kicks the
+  request back to unclaimed and notifies Emily.
+
+Not dependent on the scheduler: true multi-volunteer requests,
+travel-radius map visualization, and address-within-30-miles
+validation at submission (needs a geocoding API).
 
 ## Go-live checklist
 

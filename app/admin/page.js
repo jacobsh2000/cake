@@ -85,6 +85,16 @@ async function getVolunteerOptions(supabase) {
   return data || [];
 }
 
+async function getLastJobRun(supabase) {
+  const { data } = await supabase
+    .from("job_runs")
+    .select("job_name, started_at, finished_at, ok, error")
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data || null;
+}
+
 async function getAllVolunteers(supabase) {
   const { data } = await supabase
     .from("volunteer_profiles")
@@ -309,12 +319,13 @@ export default async function AdminPage({ searchParams }) {
   const status = searchParams?.status || "";
   const supabase = createAdminClient();
 
-  const [pending, unclaimed, inProgress, volunteers, allVolunteers] = await Promise.all([
+  const [pending, unclaimed, inProgress, volunteers, allVolunteers, lastJobRun] = await Promise.all([
     fullAdmin ? getPendingRequests(supabase) : [],
     getUnclaimedRequests(supabase),
     getInProgressRequests(supabase),
     getVolunteerOptions(supabase),
     fullAdmin ? getAllVolunteers(supabase) : [],
+    fullAdmin ? getLastJobRun(supabase) : null,
   ]);
 
   // Pending review is a queue worked oldest-first, so it keeps its own
@@ -365,6 +376,8 @@ export default async function AdminPage({ searchParams }) {
             </a>
           )}
         </div>
+
+        {fullAdmin && <JobHealth run={lastJobRun} />}
 
         {effectiveTab !== "volunteers" && (
           <FilterBar tab={effectiveTab} q={q} sort={sort} status={status} shown={shownCount} total={counts[effectiveTab]} />
@@ -554,6 +567,45 @@ function ProgressTab({ requests, volunteers, fullAdmin }) {
         );
       })}
     </>
+  );
+}
+
+// Surfaces whether the nightly job is still alive. A cron that has
+// stopped running looks exactly like a cron with nothing to do, so the
+// only way anyone notices is if the last run is stated somewhere a
+// human already looks. Stale is the interesting case — a job that has
+// not run in over a day is a problem whether or not it ever errored.
+function JobHealth({ run }) {
+  if (!run) {
+    return (
+      <div style={{ ...card, padding: 12, marginBottom: 16, borderColor: COLORS.gold, background: "#FFF8E8" }}>
+        <span style={{ fontSize: 13, fontFamily, color: COLORS.gold }}>
+          The nightly job has never run. If it's been set up, check CRON_SECRET is configured in Vercel.
+        </span>
+      </div>
+    );
+  }
+
+  const started = new Date(run.started_at);
+  const hoursAgo = (Date.now() - started.getTime()) / 3600000;
+  const stale = hoursAgo > 26;
+  const failed = run.ok === false;
+  const bad = stale || failed;
+
+  return (
+    <div style={{
+      ...card, padding: 12, marginBottom: 16,
+      borderColor: bad ? COLORS.error : COLORS.border,
+      background: bad ? "#FDECEA" : COLORS.card,
+    }}>
+      <span style={{ fontSize: 13, fontFamily, color: bad ? COLORS.error : COLORS.inkSoft }}>
+        {failed
+          ? `Nightly job failed ${formatDateTime(run.started_at)} — ${run.error || "no detail recorded"}`
+          : stale
+            ? `Nightly job hasn't run since ${formatDateTime(run.started_at)}. It should run daily.`
+            : `Nightly job last ran ${formatDateTime(run.started_at)} — OK`}
+      </span>
+    </div>
   );
 }
 

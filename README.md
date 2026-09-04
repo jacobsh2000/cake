@@ -30,6 +30,7 @@ static marketing pages and links out to this app.
    - `migration_add_volunteer_approval.sql`
    - `migration_expand_volunteer_profile.sql`
    - `migration_add_claim_role.sql`
+   - `migration_add_job_tracking.sql`
 5. Copy `.env.local.example` to `.env.local` and fill it in.
 6. `npm run dev` → http://localhost:3000
 
@@ -56,6 +57,42 @@ loads `/volunteer`, so they appear in the queue without having to do
 anything first. The migration grandfathers everyone who already
 existed; it does not re-approve anyone on a re-run, so a deliberate
 revocation sticks.
+
+## Scheduled job
+
+One cron, once a day, defined in `vercel.json` and hitting
+`/api/cron/daily`. Daily granularity is enough for everything this app
+needs — "within 5 days", "day after", "48 hours stale" — which means it
+also works on Vercel's Hobby plan, where one run per day is the limit.
+
+Set `CRON_SECRET` in Vercel's environment variables. Vercel then sends
+it as a bearer token automatically; the route refuses to run without
+it, so a misconfiguration fails closed rather than leaving a public
+email-sending endpoint open to anyone who guesses the path.
+
+The schedule is `0 13 * * *` — UTC, so 9am Eastern in summer and 8am in
+winter. Cron schedules don't shift with DST; that hour of drift is not
+worth engineering around for a morning digest.
+
+Two design points that matter more than they look:
+
+- **`job_runs` records every attempt**, and `/admin` shows the latest.
+  A cron that has silently stopped running is indistinguishable from
+  one with nothing to do, so "when did this last work" has to be a
+  fact someone can see, not an inference from an absence of email.
+  The banner turns red past 26 hours.
+- **`notifications_sent` has a UNIQUE constraint**, and jobs insert
+  the row *before* sending. Vercel Cron is at-least-once, so a run can
+  fire twice; claiming first means a duplicate run sends nothing and a
+  mid-run crash costs at most one missed email rather than re-sending
+  to everyone on the retry.
+
+To run it by hand:
+
+```
+curl -X POST https://your-app.vercel.app/api/cron/daily \
+  -H "Authorization: Bearer $CRON_SECRET"
+```
 
 ## Dates and times
 
