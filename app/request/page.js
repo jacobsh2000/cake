@@ -117,7 +117,7 @@ export default function RequestPage() {
     return (
       <div style={pageWrap}>
         <div style={{ ...card, maxWidth: 480, textAlign: "center", padding: "48px 32px" }}>
-          <CakeIcon size={48} color={COLORS.berry} />
+          <Logo size={104} />
           <h1 style={{ ...heading, fontSize: 28, marginTop: 20 }}>Request received</h1>
           <p style={{ ...bodyText, marginTop: 8 }}>
             Thank you for reaching out. Our team will review your request, and a volunteer
@@ -132,7 +132,7 @@ export default function RequestPage() {
     <div style={pageWrap}>
       <div style={{ maxWidth: 640, width: "100%" }}>
         <header style={{ textAlign: "center", marginBottom: 32 }}>
-          <CakeIcon size={40} color={COLORS.berry} />
+          <Logo size={88} />
           <h1 style={{ ...heading, fontSize: 32, marginTop: 12, marginBottom: 8 }}>
             Request a Cake
           </h1>
@@ -470,6 +470,26 @@ function PillSelect({ label, hint, options, selected, onToggle, otherValue, onOt
         />
       )}
     </div>
+  );
+}
+
+// The Columbus Cake Celebrations logo, with the drawn cake icon as a
+// stand-in until the asset lands at public/logo.png. Rendering falls
+// back on error rather than on a missing-file check, so the page never
+// shows a broken image and starts using the real mark the moment the
+// file is dropped in — no code change needed.
+function Logo({ size = 88 }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <CakeIcon size={Math.round(size * 0.45)} color={COLORS.berry} />;
+  return (
+    <img
+      src="/logo.png"
+      alt="Columbus Cake Celebrations"
+      width={size}
+      height={size}
+      onError={() => setFailed(true)}
+      style={{ display: "block", margin: "0 auto", height: "auto", maxWidth: "100%" }}
+    />
   );
 }
 
