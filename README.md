@@ -1,61 +1,84 @@
-# Columbus Cake Celebrations — MVP
+# Columbus Cake Celebrations
 
-Custom submission form + manual admin approval + volunteer portal,
-replacing SignUp Genius and the Google Sheet hand-off. Jotform stays
-in place for now (Phase 2 will replace it).
+Custom request form, admin approval queue, and volunteer portal —
+replacing the Jotform → Google Sheet → SignUp Genius hand-off that
+required an admin to manually re-key every request. Jotform is
+retired; `/request` replaces it. WordPress keeps the root domain for
+static marketing pages and links out to this app.
 
 ## Stack
-- **Next.js** (App Router) — hosted on Vercel
+- **Next.js 14** (App Router) — hosted on Vercel
 - **Clerk** — auth (volunteer + admin sign-in)
-- **Supabase** — Postgres DB only (no longer used for auth)
+- **Supabase** — Postgres only (not used for auth)
+- **Resend** — transactional email, via REST (no SDK dependency)
 
 ## Local setup
 1. `npm install`
 2. Create a Clerk app (clerk.com) — free tier is plenty. Grab the
    publishable + secret key from the dashboard.
 3. Create a Supabase project (supabase.com) if you haven't already.
-4. In the Supabase SQL editor:
-   - Run `schema.sql` (fresh project), **or**
-   - If you already had the earlier Supabase-auth version running,
-     run `migration_clerk.sql` instead to convert it over.
-5. Copy `.env.local.example` to `.env.local` and fill in Clerk's two
-   keys + Supabase's URL and service role key.
+4. In the Supabase SQL editor, run in order:
+   - `schema.sql` (fresh project), **or** `migration_clerk.sql` if you
+     already had the earlier Supabase-auth version running
+   - `migration_add_no_response_status.sql`
+5. Copy `.env.local.example` to `.env.local` and fill it in.
 6. `npm run dev` → http://localhost:3000
 
-## How data flows (updated for Clerk)
-- **`/request`** — public form, unchanged. Posts to `/api/submit-request`.
-- **`/admin`** — Emily's approval queue. `middleware.js` now requires
-  sign-in to reach it (previously wide open — this was on the
-  "before go-live" list and is now handled). **Still needed:** an
-  actual admin-role check, since right now *any* signed-in Clerk user
-  (including a volunteer) could reach `/admin` — see below.
-- **`/volunteer`** — requires Clerk sign-in (enforced by
-  `middleware.js`). The page itself no longer talks to Supabase
-  directly; it calls `/api/requests/open` (list) and
-  `/api/requests/claim` (claim), which check `auth()` from Clerk
-  server-side, then use the Supabase service role to do the actual
-  query/write. No PII is ever sent to `/api/requests/open`.
+To reach `/admin` locally, tag your own Clerk user with
+`publicMetadata: { "role": "admin" }` in the Clerk dashboard.
 
-## Before go-live — still needed
-- **Admin role check.** `/admin` is now sign-in-gated, but not
-  role-gated — any Clerk user who signs in can reach it. Add a role
-  claim in Clerk (e.g. tag Emily's account as `admin`) and check it
-  in `middleware.js` or at the top of `app/admin/page.js`.
-- **Revealing recipient PII to the claiming volunteer.** Not yet
-  built — same as before, just now it'd be a new
-  `/api/requests/[id]/recipient` route checking the volunteer owns
-  the claim, rather than a Supabase RLS policy.
-- **48-hour reassignment timer.** Not built.
-- **Notifications** (new request posted, claim confirmed, reassignment
-  warning). Not built — Clerk doesn't send these; still needs an email
-  provider wired into a scheduled job or webhook.
-- **Volunteer profile form.** A bare-bones profile row is now created
-  automatically on first claim (see `/api/requests/claim`), but
-  there's no form yet for area/frequency preferences.
+## Security model
+Recipient PII lives in its own `recipients` table, separate from the
+volunteer-visible `requests` table. The open-requests board exposes
+only a deliberately narrow `city + zip_code` "general area" — name,
+address, phone, and email are reachable only through
+`/api/requests/mine`, filtered to the calling volunteer's own claims.
+
+Because Clerk (not Supabase) owns identity, **RLS is enabled on every
+table with no policies for the anon/authenticated Postgres roles** —
+the browser cannot read or write these tables at all. Every real
+access goes through a Next.js API route that checks `auth()` from
+Clerk server-side, then uses the Supabase service role key
+(server-only, bypasses RLS) to run the query. Ownership checks in the
+route code — "does this volunteer actually own this claim?" — **are**
+the security boundary, not a database policy. Keep them there.
+
+## Routes
+| Route | Purpose |
+|---|---|
+| `/` | Homepage — links to Request / Volunteer |
+| `/request` | Public cake request form → `POST /api/submit-request` |
+| `/sign-in` | Clerk-hosted sign-in |
+| `/volunteer` | Open requests (area only, no PII) · My claimed requests (full PII, status updates, release) · My profile |
+| `/admin` | Pending review (all fields editable before approve/reject) · Approved, no volunteer (assign) · In progress (reassign) |
+
+API routes: `submit-request`, `requests/open`, `requests/mine`,
+`requests/claim`, `requests/unclaim`, `requests/status`,
+`volunteer/profile`.
+
+`middleware.js` gates `/volunteer` on any signed-in Clerk user and
+`/admin` on `publicMetadata.role === "admin"` — checked in middleware
+and again inside the server actions (defense in depth).
+
+## Not yet built
+- 48-hour auto-reassignment of an unacted-on claim
+- Reminder emails (delivery approaching, delivery-day follow-up) and
+  the daily admin digest — all need a scheduled job (Vercel Cron)
+- New-request notification emails to volunteers whose area matches
+- Accept/decline on admin-assigned claims
+- Google Sheets sync of approved requests
+
+Claim confirmation and admin-assignment emails **are** built
+(`lib/sendEmail.js`, `lib/emailTemplates.js`).
 
 ## Deploying
 1. Push to GitHub, import in Vercel.
-2. Add all four env vars from `.env.local` in Vercel's project settings.
+2. Add every var from `.env.local.example` in Vercel's project settings.
 3. In Clerk's dashboard, add your Vercel domain under allowed origins.
 4. Point a subdomain (e.g. `app.columbuscakecelebrations.com`) at the
    Vercel deployment; WordPress keeps the root domain.
+
+Before go-live, see the checklist in the project handoff: custom
+domain, Vercel Pro, Clerk Production keys (separate user pool — admin
+roles must be re-tagged), Resend domain verification, and clearing
+test data out of Supabase.
