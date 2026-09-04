@@ -47,7 +47,10 @@ create table requests (
 
   status request_status not null default 'submitted',
 
-  requested_datetime date not null,                -- must be >= 5 days out at submission time
+  requested_datetime timestamptz not null,         -- delivery date AND time; must be >= 10 days out at submission
+                                                   -- time. Stored as an instant; always rendered in
+                                                   -- America/New_York (see lib/datetime.js) so the displayed
+                                                   -- time never depends on where the viewer is.
   recipient_age integer not null,
   recipient_first_name text not null,               -- shown publicly, e.g. "Timmy, age 7"
 

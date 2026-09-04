@@ -21,11 +21,24 @@ static marketing pages and links out to this app.
    - `schema.sql` (fresh project), **or** `migration_clerk.sql` if you
      already had the earlier Supabase-auth version running
    - `migration_add_no_response_status.sql`
+   - `migration_add_travel_distance.sql`
+   - `migration_add_request_number.sql`
+   - `migration_requested_datetime_timestamptz.sql`
 5. Copy `.env.local.example` to `.env.local` and fill it in.
 6. `npm run dev` → http://localhost:3000
 
 To reach `/admin` locally, tag your own Clerk user with
 `publicMetadata: { "role": "admin" }` in the Clerk dashboard.
+
+## Dates and times
+
+`requests.requested_datetime` is a `timestamptz` — a real instant, not
+a wall-clock string. Everything the org does happens in Columbus, so
+`lib/datetime.js` pins every render to `America/New_York` rather than
+letting the viewer's browser decide. Read and write it through that
+module (`formatDateTime`, `orgLocalToUtcIso`, `utcToOrgLocalInput`);
+formatting a delivery time with a bare `toLocaleString()` will show a
+travelling volunteer the wrong hour.
 
 ## Security model
 Recipient PII lives in its own `recipients` table, separate from the

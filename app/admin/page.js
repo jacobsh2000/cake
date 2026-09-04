@@ -6,6 +6,7 @@ import { claimEmailHtml } from "../../lib/emailTemplates";
 import { revalidatePath } from "next/cache";
 import { COLORS, pageWrap, heading, card, inputStyle, labelStyle, primaryBtn, dangerBtn, tabBtn, fontFamily, requestNumberStyle } from "../../lib/theme";
 import { statusLabel, cakeFormatLabel, travelDistanceLabel } from "../../lib/labels";
+import { formatDateTime, orgLocalToUtcIso, utcToOrgLocalInput } from "../../lib/datetime";
 
 async function requireAdmin() {
   const { userId } = auth();
@@ -85,7 +86,7 @@ async function approveRequest(formData) {
 
   await supabase.from("requests").update({
     status: "posted",
-    requested_datetime: formData.get("requested_datetime"),
+    requested_datetime: orgLocalToUtcIso(formData.get("requested_datetime")),
     recipient_age: num(formData.get("child_age")),
     recipient_first_name: formData.get("child_first_name"),
     cake_or_cupcakes: formData.get("cake_or_cupcakes"),
@@ -221,7 +222,7 @@ function PendingTab({ requests }) {
               <p style={{ fontSize: 13, color: COLORS.inkSoft }}>Guardian permission confirmed: <strong>{p.guardian_permission_confirmed ? "Yes" : "No"}</strong></p>
 
               <SectionHeader>Cake details</SectionHeader>
-              <Row><TextField name="requested_datetime" label="Requested date" type="date" defaultValue={r.requested_datetime} /><TextField name="child_age" label="Child's age" type="number" defaultValue={r.recipient_age} /></Row>
+              <Row><TextField name="requested_datetime" label="Requested date & time" hint="Columbus time" type="datetime-local" defaultValue={utcToOrgLocalInput(r.requested_datetime)} /><TextField name="child_age" label="Child's age" type="number" defaultValue={r.recipient_age} /></Row>
               <TextField name="child_first_name" label="Child's first name" defaultValue={r.recipient_first_name} />
               <Row>
                 <SelectField name="cake_or_cupcakes" label="Cake or cupcakes" defaultValue={r.cake_or_cupcakes} options={CAKE_FORMAT_OPTIONS} />
@@ -269,7 +270,7 @@ function UnclaimedTab({ requests, volunteers }) {
             {r.recipient_first_name}, age {r.recipient_age} — {cakeFormatLabel(r.cake_or_cupcakes)}
           </h3>
           <p style={{ fontSize: 13, color: COLORS.inkSoft, marginBottom: 10 }}>
-            📍 {r.recipients.city}, {r.recipients.zip_code} · Needed by {r.requested_datetime}
+            📍 {r.recipients.city}, {r.recipients.zip_code} · Needed by {formatDateTime(r.requested_datetime)}
           </p>
           <AssignForm requestId={r.id} volunteers={volunteers} buttonLabel="Assign volunteer" />
         </div>
@@ -294,7 +295,7 @@ function ProgressTab({ requests, volunteers }) {
               {r.recipient_first_name}, age {r.recipient_age} — {cakeFormatLabel(r.cake_or_cupcakes)}
             </h3>
             <p style={{ fontSize: 13, color: COLORS.inkSoft, marginBottom: 6 }}>
-              📍 {r.recipients.city}, {r.recipients.zip_code} · Needed by {r.requested_datetime}
+              📍 {r.recipients.city}, {r.recipients.zip_code} · Needed by {formatDateTime(r.requested_datetime)}
             </p>
             <p style={{ fontSize: 14, marginBottom: 10 }}>
               <strong>Volunteer:</strong> {v ? `${v.first_name} ${v.last_name}`.trim() || v.id : "Unknown"} &nbsp;·&nbsp;

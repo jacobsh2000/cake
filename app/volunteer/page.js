@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useUser, UserButton } from "@clerk/nextjs";
 import { COLORS, pageWrap, heading, card, inputStyle, labelStyle, primaryBtn, outlineBtn, dangerBtn, tabBtn, fontFamily, requestNumberStyle } from "../../lib/theme";
 import { statusLabel, cakeFormatLabel, TRAVEL_DISTANCE_OPTIONS } from "../../lib/labels";
+import { formatDateTime } from "../../lib/datetime";
 
 export default function VolunteerBoard() {
   const { user, isLoaded } = useUser();
@@ -31,7 +32,7 @@ export default function VolunteerBoard() {
   }
 
   async function claim(request) {
-    const when = new Date(`${request.requested_datetime}T00:00:00`).toLocaleDateString();
+    const when = formatDateTime(request.requested_datetime);
     if (!confirm(`Claim this request? You'll be committing to a ${cakeFormatLabel(request.cake_or_cupcakes)} needed by ${when}, and the recipient's contact details will be shared with you.`)) return;
     const requestId = request.id;
     const res = await fetch("/api/requests/claim", {
@@ -98,7 +99,7 @@ export default function VolunteerBoard() {
                   {r.has_allergies && <span style={{ color: COLORS.error, fontSize: 13, marginLeft: 8, fontFamily, fontWeight: 500 }}>⚠ Allergy: {r.allergy_severity}</span>}
                 </h3>
                 {r.general_area && <p style={{ fontSize: 13, color: COLORS.gold, fontWeight: 600 }}>📍 {r.general_area}</p>}
-                <p style={pText}><strong>Needed by:</strong> {r.requested_datetime}</p>
+                <p style={pText}><strong>Needed by:</strong> {formatDateTime(r.requested_datetime)}</p>
                 <p style={pText}><strong>Flavors:</strong> {r.flavor_options?.join(", ")} · <strong>Icing:</strong> {r.icing_options?.join(", ")}</p>
                 {r.interests && <p style={pText}><strong>Interests:</strong> {r.interests}</p>}
                 {r.favorite_colors && <p style={pText}><strong>Favorite colors:</strong> {r.favorite_colors}</p>}
@@ -134,7 +135,7 @@ export default function VolunteerBoard() {
                     </p>
                   </div>
 
-                  <p style={pText}><strong>Needed by:</strong> {r.requested_datetime}</p>
+                  <p style={pText}><strong>Needed by:</strong> {formatDateTime(r.requested_datetime)}</p>
                   <p style={pText}><strong>Flavors:</strong> {r.flavor_options?.join(", ")} · <strong>Icing:</strong> {r.icing_options?.join(", ")}</p>
                   {r.has_allergies && <p style={{ ...pText, color: COLORS.error }}><strong>Allergies ({r.allergy_severity}):</strong> {r.allergy_details}</p>}
                   {r.interests && <p style={pText}><strong>Interests:</strong> {r.interests}</p>}

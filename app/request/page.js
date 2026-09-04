@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { COLORS } from "../../lib/theme";
+import { orgLocalToUtcIso, minNoticeLocalValue } from "../../lib/datetime";
 
 // Requests need this much lead time. Used for validation, the date
 // input's min attribute, and the copy in both places it's mentioned —
@@ -24,16 +25,6 @@ const MAX_CHOICES = 3;
 // aunt — where the question is real.
 const PARENT_GUARDIAN = "Parent/Guardian";
 const RELATIONSHIP_OTHER = "Other";
-
-// Returns YYYY-MM-DD in the visitor's own timezone. Built from local
-// date parts rather than toISOString(), which converts to UTC and would
-// push the cutoff a day late for anyone filling the form in the evening
-// west of Greenwich.
-function todayPlus(days) {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 
 // Merges the write-in value into the chosen options, dropping the
 // "Other" placeholder itself.
@@ -90,9 +81,11 @@ export default function RequestPage() {
     setStatus("submitting");
     setErrorMsg("");
 
-    if (form.requestedDatetime < todayPlus(MIN_NOTICE_DAYS)) {
+    // Both sides are org-local "YYYY-MM-DDTHH:mm" strings, so a plain
+    // lexicographic compare is a correct chronological one.
+    if (form.requestedDatetime < minNoticeLocalValue(MIN_NOTICE_DAYS)) {
       setStatus("error");
-      setErrorMsg(`Requested date must be at least ${MIN_NOTICE_DAYS} days from today.`);
+      setErrorMsg(`Requested delivery must be at least ${MIN_NOTICE_DAYS} days from today.`);
       return;
     }
     if (!form.termsAccepted) {
@@ -130,6 +123,7 @@ export default function RequestPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...form,
+        requestedDatetime: orgLocalToUtcIso(form.requestedDatetime),
         flavorOptions,
         icingOptions,
         relationshipToRecipient,
@@ -235,7 +229,7 @@ export default function RequestPage() {
 
           <Section number={2} title="Cake details">
             <Row>
-              <Field label="Requested delivery date" hint={`At least ${MIN_NOTICE_DAYS} days out`} type="date" min={todayPlus(MIN_NOTICE_DAYS)} value={form.requestedDatetime} onChange={(v) => update("requestedDatetime", v)} required />
+              <Field label="Requested delivery date & time" hint={`At least ${MIN_NOTICE_DAYS} days out · Columbus time`} type="datetime-local" min={minNoticeLocalValue(MIN_NOTICE_DAYS)} value={form.requestedDatetime} onChange={(v) => update("requestedDatetime", v)} required />
               <Field label="Age of cake recipient" type="number" value={form.recipientAge} onChange={(v) => update("recipientAge", v)} required />
             </Row>
             <Field label="First name of cake recipient" value={form.recipientFirstName} onChange={(v) => update("recipientFirstName", v)} required />
